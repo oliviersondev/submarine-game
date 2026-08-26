@@ -16,6 +16,18 @@ Jusqu'à 5 joueurs rejoignent une même salle, chacun avec un rôle distinct :
 
 La partie démarre automatiquement quand les 5 rôles sont occupés.
 
+### Contrôles temporaires
+
+Les commandes clavier permettent de tester le flux réseau avant l'ajout des interfaces de station :
+
+| Rôle | Touches |
+|------|---------|
+| `Pilot` | `←`/`→` cap, `↑`/`↓` vitesse, `PageUp`/`PageDown` profondeur |
+| `Sonar` | `Espace` ping sonar |
+| `Engineer` | `1` à `5` réparation d'un système |
+| `Weapons` | `Espace` tir dans le cap actuel |
+| `Captain` | Aucune commande pour le moment |
+
 ## Architecture
 
 ```
