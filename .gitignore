@@ -1,0 +1,7 @@
+/target/
+/crates/client/dist/
+/crates/client/.trunk/
+
+# IDE
+.idea/
+*.iml
