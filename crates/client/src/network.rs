@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use shared::{
     codec::{decode, encode},
-    ClientMessage, CrewRole, GameEvent, PlayerCommand, ServerMessage, SubmarineState, SystemId,
+    ClientMessage, CrewRole, GameEvent, PlayerCommand, ProtocolError, ServerMessage,
+    SubmarineState, SystemId,
 };
 
 use crate::role::current_role;
@@ -27,6 +28,7 @@ pub struct GameState {
     pub submarine: Option<SubmarineState>,
     pub snapshot_id: u64,
     pub game_started: bool,
+    pub last_error: Option<ProtocolError>,
 }
 
 pub struct NetworkPlugin;
@@ -180,21 +182,22 @@ fn handle_server_message(msg: ServerMessage, player: &mut LocalPlayer, state: &m
         }
         ServerMessage::Error(e) => {
             warn!("Server error: {e:?}");
+            state.last_error = Some(e);
         }
     }
 }
 
 fn log_controls(role: CrewRole) {
+    info!("Controls: {}", controls_for_role(role));
+}
+
+pub fn controls_for_role(role: CrewRole) -> &'static str {
     match role {
-        CrewRole::Captain => info!("Controls: none yet"),
-        CrewRole::Pilot => {
-            info!("Controls: Left/Right heading, Up/Down speed, PageUp/PageDown depth")
-        }
-        CrewRole::Sonar => info!("Controls: Space sonar ping"),
-        CrewRole::Engineer => {
-            info!("Controls: 1 Engine, 2 Torpedo, 3 Sonar, 4 Life, 5 Navigation")
-        }
-        CrewRole::Weapons => info!("Controls: Space fire torpedo at current heading"),
+        CrewRole::Captain => "aucune commande pour le moment",
+        CrewRole::Pilot => "Gauche/Droite : cap\nHaut/Bas : vitesse\nPgUp/PgDown : profondeur",
+        CrewRole::Sonar => "Espace : ping sonar",
+        CrewRole::Engineer => "1 moteur | 2 torpille | 3 sonar | 4 survie | 5 navigation",
+        CrewRole::Weapons => "Espace : tir dans le cap actuel",
     }
 }
 
