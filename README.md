@@ -1,129 +1,158 @@
 # Submarine Game
 
-A cooperative multiplayer 2D submarine game built in Rust. Each player takes a crew role aboard the same submarine — captain, pilot, sonar operator, engineer, or weapons officer — and must cooperate in real time to complete missions.
+Jeu coopératif multijoueur 2D de sous-marin en Rust. Les joueurs incarnent différents membres d'équipage et se connectent via WebSocket à une simulation autoritaire côté serveur. Le client compile en WebAssembly et est servi comme Progressive Web App.
 
-Playable directly in the browser (desktop and mobile) as a Progressive Web App, with no installation required.
+## Vue d'ensemble
 
-## Tech stack
+Jusqu'à 5 joueurs rejoignent une même salle, chacun avec un rôle distinct :
 
-| Layer | Technology |
-|---|---|
-| Client | Bevy 2D compiled to WebAssembly |
-| Web / Mobile | Progressive Web App (PWA) |
-| Server | Rust + Tokio + Axum |
-| Real-time transport | Secure WebSocket (WSS) |
-| Wire format | Binary — `serde` + `postcard` |
-| Simulation | Deterministic Rust crate, server-side only |
-| Persistence | PostgreSQL (optional — accounts and progression) |
+| Rôle | Responsabilité |
+|------|----------------|
+| `Captain` | Coordination générale, décisions tactiques |
+| `Pilot` | Cap, vitesse, profondeur |
+| `Sonar` | Détection des contacts (contacts bruts non classifiés) |
+| `Engineer` | Réparation des systèmes, gestion de l'énergie |
+| `Weapons` | Tir des torpilles |
 
-## Crew roles
-
-| Role | Responsibilities |
-|---|---|
-| Captain | Tactical map, mission orders, crew coordination |
-| Pilot | Depth, heading, speed |
-| Sonar | Detection, contact identification and tracking |
-| Engineer | Power management, damage control, repairs |
-| Weapons | Torpedo loading, tube management, targeting |
-
-Each role receives only the information relevant to its station. The sonar operator sees raw contacts; the captain sees the tactical picture once contacts are classified and shared.
+La partie démarre automatiquement quand les 5 rôles sont occupés.
 
 ## Architecture
 
 ```
-Browser / PWA (Bevy + WASM)
-        |
-        | WSS — PlayerCommand / GameEvent (binary)
-        |
-Rust server (Axum + Tokio)
-        |
-        +-- Lobby & matchmaking (in memory)
-        +-- Game rooms (one Tokio task per room)
-        +-- Authoritative simulation (10–20 ticks/s)
-        |
-        +-- PostgreSQL (optional)
-```
-
-The server is authoritative. Clients send intents (`SetEnginePower`, `LoadTorpedo`, `RepairSystem`, …); the server validates them against the player's assigned role, runs the simulation, and broadcasts state events to all crew members.
-
-## Workspace layout
-
-```
 submarine-game/
-├── Cargo.toml          # workspace
-├── crates/
-│   ├── shared/         # commands, events, IDs, wire protocol
-│   ├── simulation/     # deterministic submarine rules (no Bevy, no Axum)
-│   ├── server/         # Axum, WebSocket, lobby, game rooms
-│   └── client/         # Bevy 2D, station UIs, rendering
-├── assets/
-│   ├── sprites/
-│   ├── audio/
-│   └── fonts/
-└── infra/              # Dockerfile, deployment scripts
+├── Cargo.toml              # workspace Cargo (resolver = "2")
+├── rust-toolchain.toml     # stable + wasm32-unknown-unknown
+├── Makefile                # commandes de développement
+├── assets/                 # sprites, audio, polices (AssetServer Bevy)
+├── infra/                  # Dockerfile, configs déploiement
+└── crates/
+    ├── shared/             # protocole réseau — serde + postcard
+    │   └── src/
+    │       ├── lib.rs      # re-exports publics
+    │       ├── state.rs    # CrewRole, SystemId, SystemStatus, SubmarineState
+    │       ├── protocol.rs # ClientMessage, ServerMessage, PlayerCommand, GameEvent, ProtocolError
+    │       └── codec.rs    # encode() / decode() postcard
+    ├── simulation/         # logique déterministe — NO async, NO Bevy
+    │   └── src/lib.rs      # Simulation::new(), tick(dt), apply_command()
+    ├── server/             # Axum 0.8 + Tokio — binaire natif
+    │   └── src/
+    │       ├── main.rs     # écoute 0.0.0.0:3000, route /ws
+    │       ├── lobby.rs    # LobbyState, attribution des rôles, ws_handler
+    │       └── game_room.rs# boucle de jeu 20 Hz, broadcast StateSnapshot
+    └── client/             # Bevy 0.19 + WebGL2 — compile en WASM
+        ├── src/
+        │   ├── main.rs     # App Bevy avec DefaultPlugins + plugins custom
+        │   ├── network.rs  # WsConnection (NonSend), poll WebSocket, GameState
+        │   └── render.rs   # Camera2d, sprite sous-marin, update position/cap
+        ├── index.html      # page HTML servie par Trunk
+        └── Trunk.toml      # serve :8080
 ```
 
-The `simulation` crate has no dependency on Bevy or Axum and can be unit-tested independently.
+### Règles de dépendances
 
-## Prerequisites
+- `shared` ne dépend que de `serde` et `postcard`
+- `simulation` dépend uniquement de `shared` — jamais de Bevy ni d'Axum
+- `server` dépend de `shared` + `simulation` + Axum + Tokio
+- `client` dépend de `shared` + Bevy (jamais de simulation directement)
 
-- Rust (stable, latest) — https://rustup.rs
-- `wasm-pack` — `cargo install wasm-pack`
-- `trunk` (Bevy WASM bundler) — `cargo install trunk`
-- PostgreSQL (optional, only for persistence features)
+## Prérequis
 
-## Getting started
+| Outil | Version | Installation |
+|-------|---------|--------------|
+| Rust (stable) | ≥ 1.95 | `rustup update stable` |
+| target WASM | — | `rustup target add wasm32-unknown-unknown` |
+| Trunk | 0.20+ | `cargo install trunk --locked` |
+
+## Démarrage rapide
 
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd submarine-game
+# Terminal 1 — serveur de jeu
+make server
 
-# Run the server (development)
-cargo run -p server
+# Terminal 2 — client WASM (hot-reload)
+make client
 
-# Run the client in the browser (hot-reload)
-cd crates/client
-trunk serve
-# Open http://localhost:8080
+# Navigateur
+open http://127.0.0.1:8080
 ```
 
-## Network protocol
+Le premier build du client prend ~2 minutes (compilation de Bevy pour WASM). Les builds suivants sont quasi-instantanés grâce au cache Cargo.
 
-Clients send `PlayerCommand` messages; the server emits `GameEvent` messages. Both are serialised with `postcard` over a binary WebSocket channel.
+## Commandes disponibles
+
+```bash
+make server        # cargo run -p server (port 3000)
+make client        # trunk serve (port 8080)
+make check         # cargo check shared + simulation + server (natif)
+make check-client  # cargo check client --target wasm32-unknown-unknown
+make check-all     # les deux
+make test          # cargo test -p simulation
+make build-wasm    # trunk build --release → crates/client/dist/
+make clean         # supprime target/ + dist/ + .trunk/
+```
+
+## Protocole réseau
+
+Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
+
+### Client → Serveur (`ClientMessage`)
 
 ```rust
-// crates/shared/src/protocol.rs
-enum PlayerCommand {
-    SetEnginePower(u8),
-    ChangeDepth(i16),
-    RotateSonar(f32),
-    LoadTorpedo { tube: u8 },
-    RepairSystem { system: SystemId },
-}
+JoinLobby { role: CrewRole }   // première connexion
+Command(PlayerCommand)          // en jeu
+```
 
-enum GameEvent {
-    SubmarineStateChanged(SubmarineState),
-    SonarContactDetected(Contact),
-    SystemDamaged(SystemId),
-    TorpedoLoaded(u8),
+### Serveur → Client (`ServerMessage`)
+
+```rust
+JoinAck { player_id: u32, role: CrewRole }  // confirmation de rôle
+GameStarted                                   // les 5 rôles sont remplis
+Event(GameEvent)                              // snapshot d'état ou événement
+Error(ProtocolError)                          // rôle pris, commande rejetée…
+```
+
+### Tick rate
+
+20 ticks/s côté serveur. Le client interpolera entre les états reçus pour rendre à 60 fps (à implémenter).
+
+## État du sous-marin (`SubmarineState`)
+
+```rust
+pub struct SubmarineState {
+    pub x: f32,              // position horizontale (carte)
+    pub y: f32,              // position horizontale (carte)
+    pub depth: f32,          // profondeur en mètres (0 = surface)
+    pub heading: f32,        // cap 0–360°
+    pub speed: f32,          // nœuds
+    pub hull_integrity: f32, // 0–100
+    pub systems: Vec<(SystemId, SystemStatus)>,
 }
 ```
 
-## Deployment
+## Systèmes du sous-marin
 
-Initial target: a single server (VM or ECS Fargate container) behind an Application Load Balancer with HTTPS/WSS termination.
+`Engine` · `Torpedo` · `Sonar` · `Life` · `Navigation`
 
-Horizontal scaling (multiple game server instances) is deferred until vertical capacity is genuinely exhausted. It requires routing each reconnecting client to the correct server instance.
+Chaque système a un état `operational: bool` et un niveau d'énergie `power: f32`.
+
+## Déploiement
+
+Cible : conteneur unique (binaire Rust) derrière un AWS Application Load Balancer avec terminaison HTTPS/WSS, sur ECS Fargate. L'ALB supporte les upgrades WebSocket nativement.
+
+```bash
+# Build release server
+cargo build -p server --release
+
+# Build release client WASM
+make build-wasm
+# → artefacts dans crates/client/dist/ à servir comme fichiers statiques
+```
 
 ## Roadmap
 
-- [ ] Workspace skeleton and shared protocol crate
-- [ ] Server: WebSocket lobby and room management
-- [ ] Simulation: submarine physics and systems
-- [ ] Client: Bevy 2D base and WebSocket integration
-- [ ] Station UIs: pilot, sonar, engineer, weapons, captain
-- [ ] PWA manifest and offline splash screen
-- [ ] Mission scenarios
-- [ ] Accounts and progression (PostgreSQL)
-- [ ] Containerisation and CI/CD
+- [ ] Physique du sous-marin (`simulation::tick`)
+- [ ] UI de station (sélecteur de rôle, jauges, commandes)
+- [ ] Interpolation client entre les StateSnapshot
+- [ ] Validation des commandes par rôle (`game_room.rs`)
+- [ ] Reconnexion avec snapshot d'état complet
+- [ ] Dockerfile + déploiement ECS Fargate
