@@ -2066,6 +2066,7 @@ dependencies = [
  "bevy",
  "ewebsock",
  "shared",
+ "web-sys",
 ]
 
 [[package]]

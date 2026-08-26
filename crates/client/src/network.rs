@@ -5,6 +5,8 @@ use shared::{
     ClientMessage, CrewRole, GameEvent, ServerMessage, SubmarineState,
 };
 
+use crate::role::current_role;
+
 // WsSender/WsReceiver use Rc<WebSocket> in WASM — not Send+Sync.
 // Stored as a NonSend resource so Bevy keeps it on the main thread.
 pub struct WsConnection {
@@ -30,7 +32,7 @@ pub struct NetworkPlugin;
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(LocalPlayer {
-            role: CrewRole::Captain,
+            role: current_role(),
             id: None,
             joined: false,
         })

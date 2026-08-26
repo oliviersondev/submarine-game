@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 mod network;
 mod render;
+mod role;
 
 fn main() {
     App::new()
