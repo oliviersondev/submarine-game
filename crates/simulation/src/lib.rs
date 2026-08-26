@@ -51,6 +51,13 @@ mod tests {
     }
 
     #[test]
+    fn depth_updates() {
+        let mut sim = Simulation::new();
+        sim.apply_command(PlayerCommand::SetDepth(50.0));
+        assert_eq!(sim.state.depth, 50.0);
+    }
+
+    #[test]
     fn tick_returns_no_events_by_default() {
         let mut sim = Simulation::new();
         let events = sim.tick(0.1);
