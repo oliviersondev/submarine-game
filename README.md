@@ -92,6 +92,8 @@ open http://127.0.0.1:8080
 
 Le premier build du client prend ~2 minutes (compilation de Bevy pour WASM). Les builds suivants sont quasi-instantanés grâce au cache Cargo.
 
+Sans paramètre d'URL, le client affiche le sélecteur de rôle avant d'ouvrir la connexion WebSocket. Pour les tests rapides, `?role=pilot` (ou un autre nom de `CrewRole`) sélectionne directement le poste.
+
 ## Commandes disponibles
 
 ```bash
@@ -165,7 +167,7 @@ make build-wasm
 ## Roadmap
 
 - [x] Déplacement de base du sous-marin (`simulation::tick`)
-- [ ] UI de station (sélecteur de rôle, jauges, commandes)
+- [ ] Interfaces de station complètes (jauges et commandes)
 - [x] Interpolation client entre les StateSnapshot
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [ ] Reconnexion avec snapshot d'état complet

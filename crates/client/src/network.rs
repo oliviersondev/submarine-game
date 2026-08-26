@@ -6,7 +6,7 @@ use shared::{
     SubmarineState, SystemId,
 };
 
-use crate::role::current_role;
+use crate::role::role_from_environment;
 
 // WsSender/WsReceiver use Rc<WebSocket> in WASM — not Send+Sync.
 // Stored as a NonSend resource so Bevy keeps it on the main thread.
@@ -15,11 +15,12 @@ pub struct WsConnection {
     pub receiver: WsReceiver,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct LocalPlayer {
-    pub role: CrewRole,
+    pub role: Option<CrewRole>,
     pub id: Option<u32>,
     pub joined: bool,
+    connection_started: bool,
 }
 
 #[derive(Resource, Default)]
@@ -36,18 +37,43 @@ pub struct NetworkPlugin;
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(LocalPlayer {
-            role: current_role(),
-            id: None,
-            joined: false,
+            role: role_from_environment(),
+            ..default()
         })
         .insert_resource(GameState::default())
-        .add_systems(Update, (poll_messages, send_keyboard_command).chain());
+        .add_systems(Update, manage_connection)
+        .add_systems(Update, poll_messages.after(manage_connection))
+        .add_systems(Update, send_keyboard_command.after(poll_messages));
+    }
+}
 
-        match ewebsock::connect("ws://127.0.0.1:3000/ws", ewebsock::Options::default()) {
-            Ok((sender, receiver)) => {
-                app.insert_non_send(WsConnection { sender, receiver });
-            }
-            Err(e) => error!("WebSocket connect failed: {e}"),
+fn manage_connection(world: &mut World) {
+    let role_selected = world.resource::<LocalPlayer>().role.is_some();
+    let has_connection = world.get_non_send::<WsConnection>().is_some();
+
+    if !role_selected {
+        if has_connection {
+            world.remove_non_send::<WsConnection>();
+        }
+        let mut player = world.resource_mut::<LocalPlayer>();
+        player.connection_started = false;
+        player.joined = false;
+        player.id = None;
+        return;
+    }
+
+    if has_connection || world.resource::<LocalPlayer>().connection_started {
+        return;
+    }
+
+    world.resource_mut::<LocalPlayer>().connection_started = true;
+    match ewebsock::connect("ws://127.0.0.1:3000/ws", ewebsock::Options::default()) {
+        Ok((sender, receiver)) => {
+            world.insert_non_send(WsConnection { sender, receiver });
+        }
+        Err(error) => {
+            world.resource_mut::<LocalPlayer>().connection_started = false;
+            error!("WebSocket connect failed: {error}");
         }
     }
 }
@@ -63,10 +89,11 @@ fn poll_messages(
         match event {
             WsEvent::Opened => {
                 if !player.joined {
-                    let msg = encode(&ClientMessage::JoinLobby { role: player.role });
+                    let Some(role) = player.role else { continue };
+                    let msg = encode(&ClientMessage::JoinLobby { role });
                     ws.sender.send(WsMessage::Binary(msg));
                     player.joined = true;
-                    info!("WS opened — JoinLobby sent as {:?}", player.role);
+                    info!("WS opened — JoinLobby sent as {role:?}");
                 }
             }
             WsEvent::Message(WsMessage::Binary(bytes)) => {
@@ -74,8 +101,14 @@ fn poll_messages(
                     handle_server_message(msg, &mut player, &mut state);
                 }
             }
-            WsEvent::Closed => info!("WebSocket closed"),
-            WsEvent::Error(e) => error!("WS error: {e}"),
+            WsEvent::Closed => {
+                info!("WebSocket closed");
+                player.role = None;
+            }
+            WsEvent::Error(e) => {
+                error!("WS error: {e}");
+                player.role = None;
+            }
             _ => {}
         }
     }
@@ -91,7 +124,8 @@ fn send_keyboard_command(
         return;
     }
 
-    let Some(command) = command_for_input(player.role, &keyboard, &state) else {
+    let Some(role) = player.role else { return };
+    let Some(command) = command_for_input(role, &keyboard, &state) else {
         return;
     };
     let Some(mut ws) = ws else { return };
@@ -165,7 +199,7 @@ fn handle_server_message(msg: ServerMessage, player: &mut LocalPlayer, state: &m
     match msg {
         ServerMessage::JoinAck { player_id, role } => {
             player.id = Some(player_id);
-            player.role = role;
+            player.role = Some(role);
             info!("JoinAck: id={player_id}, role={role:?}");
             log_controls(role);
         }
@@ -182,7 +216,15 @@ fn handle_server_message(msg: ServerMessage, player: &mut LocalPlayer, state: &m
         }
         ServerMessage::Error(e) => {
             warn!("Server error: {e:?}");
+            let role_taken = matches!(&e, ProtocolError::RoleAlreadyTaken(_));
             state.last_error = Some(e);
+            if role_taken {
+                player.role = None;
+                player.id = None;
+                player.joined = false;
+                player.connection_started = false;
+                state.game_started = false;
+            }
         }
     }
 }

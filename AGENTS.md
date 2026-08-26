@@ -23,7 +23,7 @@
 - `SubmarineState` keeps horizontal `x`/`y` separate from `depth`; depth has different physical constraints and must not be collapsed into a generic xyz vector.
 - `crates/server/src/lobby.rs` owns role assignment and socket relay. `crates/server/src/game_room.rs` owns the 20 Hz authoritative simulation loop; keep those concerns separate.
 - `ewebsock` uses non-`Send` WASM handles. `WsConnection` must remain a Bevy `NonSend` resource and be polled on the main thread.
-- The client connects to `ws://127.0.0.1:3000/ws`; select its role with `?role=pilot` (or another `CrewRole` name), defaulting to `Captain`.
+- The client connects to `ws://127.0.0.1:3000/ws` only after role selection. `?role=pilot` (or another `CrewRole` name) bypasses the selector for development.
 - Rendering interpolates `x`, `y`, and heading over the 50 ms snapshot interval; `GameState::submarine` remains the latest authoritative state used for commands.
 
 ## Current Limitations

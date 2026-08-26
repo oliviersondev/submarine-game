@@ -21,21 +21,16 @@ fn role_from_query(query: &str) -> Option<CrewRole> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn current_role() -> CrewRole {
+pub fn role_from_environment() -> Option<CrewRole> {
     web_sys::window()
         .and_then(|window| window.location().search().ok())
         .as_deref()
         .and_then(role_from_query)
-        .unwrap_or(CrewRole::Captain)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn current_role() -> CrewRole {
-    std::env::var("ROLE")
-        .ok()
-        .as_deref()
-        .and_then(parse_role)
-        .unwrap_or(CrewRole::Captain)
+pub fn role_from_environment() -> Option<CrewRole> {
+    std::env::var("ROLE").ok().as_deref().and_then(parse_role)
 }
 
 #[cfg(test)]
