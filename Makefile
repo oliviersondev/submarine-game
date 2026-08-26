@@ -19,9 +19,9 @@ check-client:
 ## Vérifie tout
 check-all: check check-client
 
-## Lance les tests unitaires de simulation
+## Lance les tests unitaires de simulation et du serveur
 test:
-	cargo test -p simulation
+	cargo test -p simulation -p server
 
 ## Build WASM release (artefacts dans crates/client/dist/)
 build-wasm:

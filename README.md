@@ -86,7 +86,7 @@ make client        # trunk serve (port 8080)
 make check         # cargo check shared + simulation + server (natif)
 make check-client  # cargo check client --target wasm32-unknown-unknown
 make check-all     # les deux
-make test          # cargo test -p simulation
+make test          # cargo test -p simulation -p server
 make build-wasm    # trunk build --release → crates/client/dist/
 make clean         # supprime target/ + dist/ + .trunk/
 ```
@@ -153,6 +153,6 @@ make build-wasm
 - [ ] Physique du sous-marin (`simulation::tick`)
 - [ ] UI de station (sélecteur de rôle, jauges, commandes)
 - [ ] Interpolation client entre les StateSnapshot
-- [ ] Validation des commandes par rôle (`game_room.rs`)
+- [x] Validation des commandes par rôle (`game_room.rs`)
 - [ ] Reconnexion avec snapshot d'état complet
 - [ ] Dockerfile + déploiement ECS Fargate

@@ -4,7 +4,7 @@
 
 - Use `make check-all` for normal verification: native-check `shared`, `simulation`, and `server`, then check `client` for `wasm32-unknown-unknown`.
 - Do not use a native client check as the main signal; Bevy's native audio stack may require system ALSA development libraries, while the supported client target is WASM/WebGL2.
-- Run simulation tests with `make test`; run one test with `cargo test -p simulation <test_name>` (for example, `cargo test -p simulation heading_updates`).
+- Run native unit tests with `make test`; run one test with `cargo test -p <package> <test_name>` (for example, `cargo test -p simulation heading_updates`).
 - Development requires two long-running processes: `make server` on `0.0.0.0:3000` and `make client` on `127.0.0.1:8080`.
 - Build the deployable client with `make build-wasm`; Trunk writes to `crates/client/dist/`.
 - `rust-toolchain.toml` installs stable Rust plus native Linux and `wasm32-unknown-unknown`. Bevy 0.19 requires Rust 1.95 or newer.
@@ -28,6 +28,6 @@
 ## Current Limitations
 
 - The current lobby is one in-memory global lobby, starts when all five unique roles join, and has no persistence or reconnection flow.
-- Role-based command validation is still a TODO in `game_room.rs`; do not describe commands as validated until it is implemented and tested.
+- Role-based command validation belongs in `game_room.rs`; rejected commands must not reach `Simulation` and the error must only be sent to the originating role.
 - `Simulation::tick` currently produces no physics events, and the client does not interpolate snapshots yet.
 - There is no CI, formatter/linter config, Dockerfile, or deployment config in the repository yet; do not infer those workflows from the roadmap.
