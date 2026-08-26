@@ -24,10 +24,11 @@
 - `crates/server/src/lobby.rs` owns role assignment and socket relay. `crates/server/src/game_room.rs` owns the 20 Hz authoritative simulation loop; keep those concerns separate.
 - `ewebsock` uses non-`Send` WASM handles. `WsConnection` must remain a Bevy `NonSend` resource and be polled on the main thread.
 - The client connects to `ws://127.0.0.1:3000/ws`; select its role with `?role=pilot` (or another `CrewRole` name), defaulting to `Captain`.
+- Rendering interpolates `x`, `y`, and heading over the 50 ms snapshot interval; `GameState::submarine` remains the latest authoritative state used for commands.
 
 ## Current Limitations
 
 - The current lobby is one in-memory global lobby, starts when all five unique roles join, and has no persistence or reconnection flow.
 - Role-based command validation belongs in `game_room.rs`; rejected commands must not reach `Simulation` and the error must only be sent to the originating role.
-- `Simulation::tick` currently produces no physics events, and the client does not interpolate snapshots yet.
+- `Simulation::tick` applies basic nautical movement but produces no physics events. There are no collisions, inertia, or buoyancy yet.
 - There is no CI, formatter/linter config, Dockerfile, or deployment config in the repository yet; do not infer those workflows from the roadmap.

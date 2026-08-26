@@ -23,7 +23,9 @@ pub struct LocalPlayer {
 
 #[derive(Resource, Default)]
 pub struct GameState {
+    pub previous_submarine: Option<SubmarineState>,
     pub submarine: Option<SubmarineState>,
+    pub snapshot_id: u64,
     pub game_started: bool,
 }
 
@@ -170,7 +172,8 @@ fn handle_server_message(msg: ServerMessage, player: &mut LocalPlayer, state: &m
             info!("Game started!");
         }
         ServerMessage::Event(GameEvent::StateSnapshot(sub)) => {
-            state.submarine = Some(sub);
+            state.previous_submarine = state.submarine.replace(sub);
+            state.snapshot_id = state.snapshot_id.wrapping_add(1);
         }
         ServerMessage::Event(event) => {
             debug!("GameEvent: {event:?}");
@@ -208,6 +211,7 @@ mod tests {
                 ..default()
             }),
             game_started: true,
+            ..default()
         }
     }
 

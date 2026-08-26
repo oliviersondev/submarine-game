@@ -125,7 +125,7 @@ Error(ProtocolError)                          // rôle pris, commande rejetée�
 
 ### Tick rate
 
-20 ticks/s côté serveur. Le client interpolera entre les états reçus pour rendre à 60 fps (à implémenter).
+20 ticks/s côté serveur. Le tick fait avancer le sous-marin avec un cap nautique (`0°` nord, `90°` est) et convertit sa vitesse des nœuds vers les mètres par seconde. Le client interpole la position et le cap entre les deux derniers snapshots pour rendre à 60 fps.
 
 ## État du sous-marin (`SubmarineState`)
 
@@ -162,9 +162,9 @@ make build-wasm
 
 ## Roadmap
 
-- [ ] Physique du sous-marin (`simulation::tick`)
+- [x] Déplacement de base du sous-marin (`simulation::tick`)
 - [ ] UI de station (sélecteur de rôle, jauges, commandes)
-- [ ] Interpolation client entre les StateSnapshot
+- [x] Interpolation client entre les StateSnapshot
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [ ] Reconnexion avec snapshot d'état complet
 - [ ] Dockerfile + déploiement ECS Fargate
