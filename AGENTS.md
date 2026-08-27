@@ -23,7 +23,7 @@
 - `SubmarineState` keeps horizontal `x`/`y` separate from `depth`; depth has different physical constraints and must not be collapsed into a generic xyz vector.
 - `crates/server/src/lobby.rs` owns role assignment and socket relay. `crates/server/src/game_room.rs` owns the 20 Hz authoritative simulation loop; keep those concerns separate.
 - `ewebsock` uses non-`Send` WASM handles. `WsConnection` must remain a Bevy `NonSend` resource and be polled on the main thread.
-- The client connects to `ws://127.0.0.1:3000/ws` only after role selection. `?role=pilot` (or another `CrewRole` name) bypasses the selector for development.
+- The client connects only after create/join and role selection. WASM derives `/ws` from the page origin, using port 3000 when Trunk runs on 8080; `?role=pilot` creates a room directly for development.
 - Rendering interpolates `x`, `y`, and heading over the 50 ms snapshot interval; `GameState::submarine` remains the latest authoritative state used for commands.
 
 ## Design Sources
@@ -34,7 +34,7 @@
 
 ## Current Limitations
 
-- The current lobby is one in-memory global lobby, starts when all five unique roles join, and has no persistence or reconnection flow.
+- Rooms are held in one in-memory registry, start explicitly with one to five humans, and fill free roles with bots. There is still no persistence or reconnection flow.
 - Role-based command validation belongs in `game_room.rs`; rejected commands must not reach `Simulation` and the error must only be sent to the originating role.
 - `Simulation::tick` applies basic nautical movement but produces no physics events. There are no collisions, inertia, or buoyancy yet.
 - Sonar ping has no effect, repair emits an event without mutating system state, and firing emits an event without creating a torpedo.

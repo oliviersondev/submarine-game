@@ -1,12 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CrewRole {
     Captain,
     Pilot,
     Sonar,
     Engineer,
     Weapons,
+}
+
+impl CrewRole {
+    pub const ALL: [Self; 5] = [
+        Self::Captain,
+        Self::Pilot,
+        Self::Sonar,
+        Self::Engineer,
+        Self::Weapons,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -18,7 +28,7 @@ pub enum SystemId {
     Navigation,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemStatus {
     pub operational: bool,
     pub power: f32,
@@ -33,7 +43,7 @@ impl Default for SystemStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubmarineState {
     pub x: f32,
     pub y: f32,

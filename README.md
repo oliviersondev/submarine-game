@@ -1,6 +1,6 @@
 # Submarine Game
 
-Jeu coopératif multijoueur 2D de sous-marin en Rust. Les joueurs incarnent différents membres d'équipage et se connectent via WebSocket à une simulation autoritaire côté serveur. Le client compile en WebAssembly et est servi comme Progressive Web App.
+Jeu coopératif multijoueur 2D de sous-marin en Rust. Les joueurs incarnent différents membres d'équipage et se connectent via WebSocket à une simulation autoritaire côté serveur. Le client compile en WebAssembly et est servi par Trunk ; aucun manifeste ni service worker PWA n'est encore présent.
 
 ## Documentation de conception
 
@@ -14,7 +14,7 @@ Les documents distinguent explicitement le prototype actuel des fonctionnalités
 
 ## Vue d'ensemble
 
-Jusqu'à 5 joueurs rejoignent une même salle, chacun avec un rôle distinct :
+Un à cinq joueurs créent ou rejoignent une salle éphémère par son code court, chacun avec un rôle distinct :
 
 | Rôle | Responsabilité |
 |------|----------------|
@@ -24,7 +24,7 @@ Jusqu'à 5 joueurs rejoignent une même salle, chacun avec un rôle distinct :
 | `Engineer` | Réparation des systèmes, gestion de l'énergie |
 | `Weapons` | Tir des torpilles |
 
-La partie démarre automatiquement quand les 5 rôles sont occupés.
+Chaque joueur peut se déclarer prêt. Un joueur démarre explicitement la mission ; les rôles libres sont alors affichés et conservés comme bots. Plusieurs salles indépendantes peuvent fonctionner dans le même processus. Il n'y a ni persistance ni reconnexion à ce stade.
 
 ### Contrôles temporaires
 
@@ -36,9 +36,9 @@ Les commandes clavier permettent de tester le flux réseau avant l'ajout des int
 | `Sonar` | `Espace` ping sonar |
 | `Engineer` | `1` à `5` réparation d'un système |
 | `Weapons` | `Espace` tir dans le cap actuel |
-| `Captain` | Aucune commande pour le moment |
+| `Captain` | Bouton tactile envoyant un ordre structuré au bot Pilote |
 
-Le HUD affiche le rôle, l'état du lobby, les dernières valeurs autoritaires de cap/vitesse/profondeur, les raccourcis disponibles et la dernière erreur renvoyée par le serveur. Le poste Pilote dispose aussi de jauges et de boutons souris/tactiles pour régler le cap, la vitesse et la profondeur.
+Le HUD affiche le code de salle, les humains/bots, les états prêts, le tick serveur, les dernières valeurs autoritaires et la dernière erreur. Le poste Pilote dispose de jauges et de boutons souris/tactiles. Le Capitaine peut transmettre au bot Pilote une consigne de cap, vitesse et profondeur ; cet ordre est explicitement refusé si le Pilote est humain.
 
 ## Architecture
 
@@ -54,14 +54,14 @@ submarine-game/
     │   └── src/
     │       ├── lib.rs      # re-exports publics
     │       ├── state.rs    # CrewRole, SystemId, SystemStatus, SubmarineState
-    │       ├── protocol.rs # ClientMessage, ServerMessage, PlayerCommand, GameEvent, ProtocolError
+    │       ├── protocol.rs # enveloppes versionnées, lobby, mission, identifiants et erreurs
     │       └── codec.rs    # encode() / decode() postcard
     ├── simulation/         # logique déterministe — NO async, NO Bevy
     │   └── src/lib.rs      # Simulation::new(), tick(dt), apply_command()
     ├── server/             # Axum 0.8 + Tokio — binaire natif
     │   └── src/
     │       ├── main.rs     # écoute 0.0.0.0:3000, route /ws
-    │       ├── lobby.rs    # LobbyState, attribution des rôles, ws_handler
+    │       ├── lobby.rs    # registre de salles, rôles, prêts, démarrage, ws_handler
     │       └── game_room.rs# boucle de jeu 20 Hz, broadcast StateSnapshot
     └── client/             # Bevy 0.19 + WebGL2 — compile en WASM
         ├── src/
@@ -102,7 +102,9 @@ open http://127.0.0.1:8080
 
 Le premier build du client prend ~2 minutes (compilation de Bevy pour WASM). Les builds suivants sont quasi-instantanés grâce au cache Cargo.
 
-Sans paramètre d'URL, le client affiche le sélecteur de rôle avant d'ouvrir la connexion WebSocket. Pour les tests rapides, `?role=pilot` (ou un autre nom de `CrewRole`) sélectionne directement le poste.
+Sans paramètre d'URL, le client demande un rôle puis permet de créer une salle ou de saisir au clavier ou au pavé tactile les six chiffres d'un code avant d'ouvrir la connexion. Pour les tests rapides, `?role=pilot` (ou un autre nom de `CrewRole`) sélectionne le poste et crée directement une salle.
+
+Depuis Trunk sur le port `8080`, l'URL WebSocket utilise le nom d'hôte de la page et le port de développement `3000`. Sur une autre origine, elle utilise le même hôte, port et un schéma `ws`/`wss` correspondant à la page. En exécution native de développement, `WS_URL` permet de la remplacer.
 
 ## Commandes disponibles
 
@@ -112,7 +114,7 @@ make client        # trunk serve (port 8080)
 make check         # cargo check shared + simulation + server (natif)
 make check-client  # cargo check client --target wasm32-unknown-unknown
 make check-all     # les deux
-make test          # cargo test -p simulation -p server
+make test          # cargo test -p shared -p simulation -p server
 make build-wasm    # trunk build --release → crates/client/dist/
 make clean         # supprime target/ + dist/ + .trunk/
 ```
@@ -121,25 +123,29 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-### Client → Serveur (`ClientMessage`)
+Chaque enveloppe porte `version: u16` (actuellement `1`). `RoomId`, `SessionId`, `PlayerId` et `CommandId` sont des types opaques. Les commandes sont séparées entre lobby et mission.
+
+### Client → Serveur (`ClientPayload`)
 
 ```rust
-JoinLobby { role: CrewRole }   // première connexion
-Command(PlayerCommand)          // en jeu
+Lobby(CreateRoom | JoinRoom | SetReady | StartMission)
+Mission(Player { command_id, command } | OrderPilotBot { command_id, order })
 ```
 
-### Serveur → Client (`ServerMessage`)
+### Serveur → Client (`ServerPayload`)
 
 ```rust
-JoinAck { player_id: u32, role: CrewRole }  // confirmation de rôle
-GameStarted                                   // les 5 rôles sont remplis
-Event(GameEvent)                              // snapshot d'état ou événement
-Error(ProtocolError)                          // rôle pris, commande rejetée…
+SessionJoined { session_id, player_id, room_id, role }
+Lobby(LobbySnapshot)                          // humains, bots et prêts
+MissionStarted { config }
+Snapshot { snapshot_id, tick, submarine }
+Event { tick, event }
+Error { command_id, error }
 ```
 
 ### Tick rate
 
-20 ticks/s côté serveur. Le tick fait avancer le sous-marin avec un cap nautique (`0°` nord, `90°` est) et convertit sa vitesse des nœuds vers les mètres par seconde. Le client interpole la position et le cap entre les deux derniers snapshots pour rendre à 60 fps.
+20 ticks/s côté serveur et par salle. Chaque mission reçoit une graine déterministe, et chaque snapshot contient ses numéros de snapshot et de tick. Le tick fait avancer le sous-marin avec un cap nautique (`0°` nord, `90°` est) et convertit sa vitesse des nœuds vers les mètres par seconde. Le client ignore les anciens snapshots et interpole la position et le cap entre les deux derniers reçus.
 
 ## État du sous-marin (`SubmarineState`)
 
@@ -180,5 +186,7 @@ make build-wasm
 - [ ] Interfaces de station complètes (jauges et commandes)
 - [x] Interpolation client entre les StateSnapshot
 - [x] Validation des commandes par rôle (`game_room.rs`)
+- [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
+- [x] Protocole v1 avec fixtures `postcard`, identifiants et ticks numérotés
 - [ ] Reconnexion avec snapshot d'état complet
 - [ ] Dockerfile + déploiement ECS Fargate

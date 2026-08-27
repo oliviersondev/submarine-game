@@ -101,6 +101,10 @@ Les commandes sonar, armement et réparation sont encore symboliques. Le lobby e
 - Un bot n'envoie que des commandes permises pour son rôle.
 - Deux exécutions avec la même graine et les mêmes ordres atteignent le même état final sur la même cible.
 
+### État implémenté au 27 août 2026
+
+Les livrables M1 ci-dessus sont présents sous forme minimale : salles éphémères en mémoire, rôles uniques, prêts, démarrage explicite dès un humain avec quatre bots en solo, protocole v1 avec fixtures, mission déterministe numérotée et ordre du capitaine au bot Pilote. Les tests couvrent notamment deux salles isolées, les permissions du bot et le rejeu déterministe. La persistance, la reconnexion, les bots des autres postes et des contrôles capitaine configurables restent hors de M1 ; l'ordre tactile livré utilise une consigne fixe de démonstration.
+
 ## 6. M2 - Navigation, plongée et endurance
 
 **Objectif joueur :** choisir entre vitesse, profondeur, autonomie et discrétion.

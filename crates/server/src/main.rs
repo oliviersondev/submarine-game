@@ -6,11 +6,11 @@ use tokio::{net::TcpListener, sync::RwLock};
 mod game_room;
 mod lobby;
 
-use lobby::LobbyState;
+use lobby::RoomRegistry;
 
 #[tokio::main]
 async fn main() {
-    let state = Arc::new(RwLock::new(LobbyState::new()));
+    let state = Arc::new(RwLock::new(RoomRegistry::new()));
 
     let app = Router::new()
         .route("/ws", any(lobby::ws_handler))

@@ -1,7 +1,11 @@
 use bevy::prelude::*;
-use shared::{CrewRole, PlayerCommand, ProtocolError, SubmarineState};
+use bevy::window::PrimaryWindow;
+use shared::{
+    CrewRole, LobbyCommand, PilotOrder, PlayerCommand, ProtocolError, RoleOccupant, RoomId,
+    SubmarineState,
+};
 
-use crate::network::{controls_for_role, CommandQueue, GameState, LocalPlayer};
+use crate::network::{controls_for_role, CommandQueue, GameState, LocalPlayer, RoomRequest};
 
 #[derive(Component)]
 struct SubmarineMarker;
@@ -22,7 +26,32 @@ struct RoleSelector;
 struct SelectorErrorText;
 
 #[derive(Component)]
+struct RoomCodeText;
+
+#[derive(Component)]
 struct RoleChoice(CrewRole);
+
+#[derive(Clone, Copy, Component)]
+enum SetupAction {
+    Create,
+    Join,
+}
+
+#[derive(Clone, Copy, Component)]
+enum CodeKey {
+    Digit(char),
+    Delete,
+}
+
+#[derive(Clone, Copy, Component)]
+enum LobbyAction {
+    Ready,
+    Start,
+    OrderPilot,
+}
+
+#[derive(Component)]
+struct LobbyPanel;
 
 #[derive(Component)]
 struct PilotPanel;
@@ -65,10 +94,16 @@ impl Plugin for RenderPlugin {
                 (
                     update_submarine,
                     update_hud,
-                    update_panel_visibility,
-                    update_selector_error,
+                    update_panel_visibility.after(crate::network::NetworkReceiveSet),
+                    update_selector_error.after(crate::network::NetworkReceiveSet),
+                    update_room_code,
                     update_pilot_station,
+                    update_lobby_action_layout,
                     role_button_system,
+                    setup_button_system,
+                    room_code_input,
+                    code_key_system,
+                    lobby_button_system,
                     pilot_button_system,
                 ),
             );
@@ -107,7 +142,7 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
         BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.9)),
         BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.75)),
         GlobalZIndex(20),
-        if player.role.is_some() {
+        if player.id.is_some() {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -122,7 +157,7 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
             left: px(16),
             right: px(16),
             max_width: px(520),
-            height: px(390),
+            height: px(580),
             border: UiRect::all(px(1)),
             border_radius: BorderRadius::all(px(8)),
             ..default()
@@ -191,14 +226,119 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
             TextColor(Color::srgb(0.82, 0.95, 1.0)),
             Node {
                 position_type: PositionType::Absolute,
-                top: px(118.0 + index as f32 * 50.0),
+                top: px(142.0 + index as f32 * 50.0),
                 left: px(34),
                 right: px(34),
                 max_width: px(484),
                 height: px(42),
                 padding: UiRect::axes(px(14), px(9)),
+                border: UiRect::all(px(1)),
                 border_radius: BorderRadius::all(px(4)),
                 align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+            BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.2)),
+            GlobalZIndex(20),
+            selector_visibility(&player),
+        ));
+    }
+
+    for digit in 0..10 {
+        commands.spawn((
+            RoleSelector,
+            CodeKey::Digit(char::from_digit(digit, 10).unwrap()),
+            Button,
+            Text::new(digit.to_string()),
+            TextFont {
+                font_size: FontSize::Px(17.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(386.0 + (digit / 5) as f32 * 48.0),
+                left: px(34.0 + (digit % 5) as f32 * 50.0),
+                width: px(44),
+                height: px(44),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+            GlobalZIndex(20),
+            selector_visibility(&player),
+        ));
+    }
+
+    commands.spawn((
+        RoleSelector,
+        RoomCodeText,
+        Text::new("CODE SALLE : ------"),
+        TextFont {
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.82, 0.95, 1.0)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(486),
+            left: px(34),
+            ..default()
+        },
+        GlobalZIndex(20),
+        selector_visibility(&player),
+    ));
+
+    commands.spawn((
+        RoleSelector,
+        CodeKey::Delete,
+        Button,
+        Text::new("EFFACER"),
+        TextFont {
+            font_size: FontSize::Px(13.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.82, 0.95, 1.0)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(478),
+            left: px(276),
+            width: px(90),
+            height: px(44),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            border_radius: BorderRadius::all(px(4)),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        GlobalZIndex(20),
+        selector_visibility(&player),
+    ));
+
+    for (action, label, left) in [
+        (SetupAction::Create, "CREER", 34.0),
+        (SetupAction::Join, "REJOINDRE", 174.0),
+    ] {
+        commands.spawn((
+            RoleSelector,
+            action,
+            Button,
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(16.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(530),
+                left: px(left),
+                width: px(128),
+                height: px(44),
+                padding: UiRect::axes(px(14), px(10)),
+                border_radius: BorderRadius::all(px(4)),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
@@ -218,8 +358,10 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
         TextColor(Color::srgb(1.0, 0.45, 0.35)),
         Node {
             position_type: PositionType::Absolute,
-            top: px(372),
+            top: px(108),
             left: px(34),
+            right: px(34),
+            max_width: px(484),
             ..default()
         },
         GlobalZIndex(20),
@@ -227,6 +369,75 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
     ));
 
     spawn_pilot_station(&mut commands, &player);
+    spawn_lobby_actions(&mut commands, &player);
+}
+
+fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
+    for (action, label, top) in [
+        (LobbyAction::Ready, "PRET", 16.0),
+        (LobbyAction::Start, "DEMARRER", 68.0),
+        (
+            LobbyAction::OrderPilot,
+            "ORDRE BOT PILOTE 090 / 8 kn / 50 m",
+            16.0,
+        ),
+    ] {
+        commands.spawn((
+            LobbyPanel,
+            action,
+            Button,
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(14.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(top),
+                right: px(16),
+                width: px(220),
+                min_height: px(44),
+                padding: UiRect::all(px(12)),
+                border_radius: BorderRadius::all(px(4)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+            GlobalZIndex(20),
+            lobby_action_visibility(player, action),
+        ));
+    }
+}
+
+fn update_lobby_action_layout(
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut actions: Query<(&LobbyAction, &mut Node)>,
+) {
+    let compact = window.width() < 800.0;
+
+    for (action, mut node) in &mut actions {
+        if compact {
+            node.top = Val::Auto;
+            node.bottom = px(match action {
+                LobbyAction::Ready => 68,
+                LobbyAction::Start | LobbyAction::OrderPilot => 16,
+            });
+            node.left = px(16);
+            node.right = px(16);
+            node.width = Val::Auto;
+            node.max_width = px(420);
+        } else {
+            node.top = px(match action {
+                LobbyAction::Ready | LobbyAction::OrderPilot => 16,
+                LobbyAction::Start => 68,
+            });
+            node.bottom = Val::Auto;
+            node.left = Val::Auto;
+            node.right = px(16);
+            node.width = px(220);
+            node.max_width = Val::Auto;
+        }
+    }
 }
 
 fn spawn_pilot_station(commands: &mut Commands, player: &LocalPlayer) {
@@ -250,7 +461,7 @@ fn spawn_pilot_station(commands: &mut Commands, player: &LocalPlayer) {
             BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.94)),
             BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.75)),
             GlobalZIndex(20),
-            pilot_visibility(player),
+            pilot_visibility(player, false),
         ))
         .with_children(|panel| {
             panel.spawn((
@@ -357,15 +568,25 @@ fn spawn_pilot_button(
 }
 
 fn selector_visibility(player: &LocalPlayer) -> Visibility {
-    if player.role.is_none() {
+    if player.id.is_none() {
         Visibility::Visible
     } else {
         Visibility::Hidden
     }
 }
 
-fn pilot_visibility(player: &LocalPlayer) -> Visibility {
-    if player.role == Some(CrewRole::Pilot) {
+fn lobby_action_visibility(player: &LocalPlayer, action: LobbyAction) -> Visibility {
+    if player.id.is_some()
+        && (!matches!(action, LobbyAction::OrderPilot) || player.role == Some(CrewRole::Captain))
+    {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    }
+}
+
+fn pilot_visibility(player: &LocalPlayer, game_started: bool) -> Visibility {
+    if player.role == Some(CrewRole::Pilot) && player.id.is_some() && game_started {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -435,24 +656,40 @@ fn update_hud(
 
 fn update_panel_visibility(
     player: Res<LocalPlayer>,
+    state: Res<GameState>,
     mut panels: Query<
         (
             &mut Visibility,
             Option<&HudPanel>,
             Option<&RoleSelector>,
             Option<&PilotPanel>,
+            Option<&LobbyPanel>,
+            Option<&LobbyAction>,
         ),
-        Or<(With<HudPanel>, With<RoleSelector>, With<PilotPanel>)>,
+        Or<(
+            With<HudPanel>,
+            With<RoleSelector>,
+            With<PilotPanel>,
+            With<LobbyPanel>,
+        )>,
     >,
 ) {
-    if !player.is_changed() {
+    if !player.is_changed() && !state.is_changed() {
         return;
     }
 
-    for (mut visibility, hud, selector, pilot) in &mut panels {
-        *visibility = if (hud.is_some() && player.role.is_some())
-            || (selector.is_some() && player.role.is_none())
-            || (pilot.is_some() && player.role == Some(CrewRole::Pilot))
+    for (mut visibility, hud, selector, pilot, lobby, lobby_action) in &mut panels {
+        let lobby_action_visible = lobby_action.is_some_and(|action| match action {
+            LobbyAction::Ready | LobbyAction::Start => !state.game_started,
+            LobbyAction::OrderPilot => state.game_started && player.role == Some(CrewRole::Captain),
+        });
+        *visibility = if (hud.is_some() && player.id.is_some())
+            || (selector.is_some() && player.id.is_none())
+            || (pilot.is_some()
+                && player.role == Some(CrewRole::Pilot)
+                && player.id.is_some()
+                && state.game_started)
+            || (lobby.is_some() && player.id.is_some() && lobby_action_visible)
         {
             Visibility::Visible
         } else {
@@ -493,10 +730,6 @@ fn update_selector_error(
     state: Res<GameState>,
     mut text: Single<&mut Text, With<SelectorErrorText>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
-
     text.0 = state
         .last_error
         .as_ref()
@@ -504,19 +737,178 @@ fn update_selector_error(
         .unwrap_or_default();
 }
 
+fn update_room_code(player: Res<LocalPlayer>, mut text: Single<&mut Text, With<RoomCodeText>>) {
+    if player.is_changed() {
+        text.0 = format!("CODE SALLE : {:_<6}", player.room_code);
+    }
+}
+
 fn role_button_system(
+    mut buttons: Query<(
+        &Interaction,
+        &RoleChoice,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &mut Text,
+    )>,
+    mut player: ResMut<LocalPlayer>,
+    mut state: ResMut<GameState>,
+) {
+    for (interaction, choice, mut background, mut border, mut text) in &mut buttons {
+        if *interaction == Interaction::Pressed {
+            player.role = Some(choice.0);
+            state.last_error = None;
+        }
+
+        let selected = player.role == Some(choice.0);
+        *background = match (*interaction, selected) {
+            (Interaction::Pressed, _) => BackgroundColor(Color::srgb(0.08, 0.42, 0.52)),
+            (Interaction::Hovered, _) => BackgroundColor(Color::srgb(0.06, 0.28, 0.36)),
+            (Interaction::None, true) => BackgroundColor(Color::srgb(0.05, 0.32, 0.4)),
+            (Interaction::None, false) => BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        };
+        *border = BorderColor::all(if selected {
+            Color::srgb(0.25, 0.85, 1.0)
+        } else {
+            Color::srgba(0.2, 0.75, 0.9, 0.2)
+        });
+        text.0 = if selected {
+            format!(
+                "> {}  //  {}  [SELECTIONNE]",
+                role_label(choice.0),
+                role_summary(choice.0)
+            )
+        } else {
+            format!("{}  //  {}", role_label(choice.0), role_summary(choice.0))
+        };
+    }
+}
+
+fn setup_button_system(
     mut buttons: Query<
-        (&Interaction, &RoleChoice, &mut BackgroundColor),
+        (&Interaction, &SetupAction, &mut BackgroundColor),
         (Changed<Interaction>, With<Button>),
     >,
     mut player: ResMut<LocalPlayer>,
     mut state: ResMut<GameState>,
 ) {
-    for (interaction, choice, mut background) in &mut buttons {
+    for (interaction, action, mut background) in &mut buttons {
         *background = match interaction {
             Interaction::Pressed => {
-                player.role = Some(choice.0);
-                *state = GameState::default();
+                if player.role.is_none() {
+                    state.last_error = Some(ProtocolError::CommandNotAllowedForRole);
+                } else {
+                    state.last_error = None;
+                    player.request = match action {
+                        SetupAction::Create => Some(RoomRequest::Create),
+                        SetupAction::Join if valid_room_code(&player.room_code) => {
+                            Some(RoomRequest::Join(RoomId(player.room_code.clone())))
+                        }
+                        SetupAction::Join => {
+                            state.last_error = Some(ProtocolError::InvalidRoomCode);
+                            None
+                        }
+                    };
+                }
+                BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
+            }
+            Interaction::Hovered => BackgroundColor(Color::srgb(0.06, 0.28, 0.36)),
+            Interaction::None => BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        };
+    }
+}
+
+fn room_code_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut player: ResMut<LocalPlayer>,
+    mut state: ResMut<GameState>,
+) {
+    if player.request.is_some() {
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::Backspace) {
+        player.room_code.pop();
+        state.last_error = None;
+    }
+    if player.room_code.len() >= 6 {
+        return;
+    }
+    for (key, character) in [
+        (KeyCode::Digit0, '0'),
+        (KeyCode::Digit1, '1'),
+        (KeyCode::Digit2, '2'),
+        (KeyCode::Digit3, '3'),
+        (KeyCode::Digit4, '4'),
+        (KeyCode::Digit5, '5'),
+        (KeyCode::Digit6, '6'),
+        (KeyCode::Digit7, '7'),
+        (KeyCode::Digit8, '8'),
+        (KeyCode::Digit9, '9'),
+    ] {
+        if keyboard.just_pressed(key) {
+            player.room_code.push(character);
+            state.last_error = None;
+            break;
+        }
+    }
+}
+
+fn code_key_system(
+    mut buttons: Query<
+        (&Interaction, &CodeKey, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut player: ResMut<LocalPlayer>,
+    mut state: ResMut<GameState>,
+) {
+    if player.request.is_some() {
+        return;
+    }
+    for (interaction, key, mut background) in &mut buttons {
+        *background = match interaction {
+            Interaction::Pressed => {
+                match key {
+                    CodeKey::Digit(digit) if player.room_code.len() < 6 => {
+                        player.room_code.push(*digit);
+                        state.last_error = None;
+                    }
+                    CodeKey::Delete => {
+                        player.room_code.pop();
+                        state.last_error = None;
+                    }
+                    CodeKey::Digit(_) => {}
+                }
+                BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
+            }
+            Interaction::Hovered => BackgroundColor(Color::srgb(0.06, 0.28, 0.36)),
+            Interaction::None => BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        };
+    }
+}
+
+fn lobby_button_system(
+    mut buttons: Query<
+        (&Interaction, &LobbyAction, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    state: Res<GameState>,
+    mut commands: ResMut<CommandQueue>,
+) {
+    for (interaction, action, mut background) in &mut buttons {
+        *background = match interaction {
+            Interaction::Pressed => {
+                match action {
+                    LobbyAction::Ready => commands.lobby(LobbyCommand::SetReady { ready: true }),
+                    LobbyAction::Start => commands.lobby(LobbyCommand::StartMission),
+                    LobbyAction::OrderPilot if state.game_started => {
+                        commands.order_pilot(PilotOrder {
+                            heading: 90.0,
+                            speed: 8.0,
+                            depth: 50.0,
+                        });
+                    }
+                    LobbyAction::OrderPilot => {}
+                }
                 BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
             }
             Interaction::Hovered => BackgroundColor(Color::srgb(0.06, 0.28, 0.36)),
@@ -593,6 +985,26 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
         "CONNEXION AU SERVEUR"
     };
 
+    let lobby = state.lobby.as_ref().map_or_else(String::new, |lobby| {
+        let slots = lobby
+            .slots
+            .iter()
+            .map(|slot| match slot.occupant {
+                RoleOccupant::Human { ready, .. } => format!(
+                    "{} : HUMAIN {}",
+                    role_label(slot.role),
+                    if ready { "PRET" } else { "ATTENTE" }
+                ),
+                RoleOccupant::Bot => format!("{} : BOT", role_label(slot.role)),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\nSALLE {} // TICK {}\n{}",
+            lobby.room_id.0, state.server_tick, slots
+        )
+    });
+
     let telemetry = state.submarine.as_ref().map_or_else(
         || "CAP       ---\nVITESSE   ---\nPROFONDEUR ---".to_owned(),
         |submarine| {
@@ -606,16 +1018,23 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
     let error = state
         .last_error
         .as_ref()
-        .map(|error| format!("\n\nERREUR SERVEUR\n{error:?}"))
+        .map(|error| format!("\n\nERREUR SERVEUR\n{}", error_label(error)))
         .unwrap_or_default();
 
     if role == CrewRole::Pilot {
-        format!("SUBMARINE // {}\n{}{}", role_label(role), status, error)
-    } else {
         format!(
-            "SUBMARINE // {}\n{}\n\n{}\n\nCOMMANDES\n{}{}",
+            "SUBMARINE // {}\n{}{}{}",
             role_label(role),
             status,
+            lobby,
+            error
+        )
+    } else {
+        format!(
+            "SUBMARINE // {}\n{}{}\n\n{}\n\nCOMMANDES\n{}{}",
+            role_label(role),
+            status,
+            lobby,
             telemetry,
             controls_for_role(role),
             error
@@ -650,7 +1069,19 @@ fn error_label(error: &ProtocolError) -> String {
         }
         ProtocolError::CommandNotAllowedForRole => "COMMANDE INTERDITE POUR CE POSTE".to_owned(),
         ProtocolError::GameNotStarted => "LA PARTIE N'A PAS ENCORE DEMARRE".to_owned(),
+        ProtocolError::IncompatibleVersion { .. } => "VERSION DE PROTOCOLE INCOMPATIBLE".to_owned(),
+        ProtocolError::RoomNotFound => "SALLE INTROUVABLE".to_owned(),
+        ProtocolError::RoomAlreadyStarted => "MISSION DEJA DEMARREE".to_owned(),
+        ProtocolError::PilotControlledByHuman => {
+            "ORDRE BOT BLOQUE : LE PILOTE EST HUMAIN".to_owned()
+        }
+        ProtocolError::InvalidRoomCode => "CODE SALLE INVALIDE : 6 CHIFFRES REQUIS".to_owned(),
+        ProtocolError::ConnectionFailed => "CONNEXION AU SERVEUR IMPOSSIBLE".to_owned(),
     }
+}
+
+fn valid_room_code(code: &str) -> bool {
+    code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -672,7 +1103,7 @@ mod tests {
     fn pilot_hud_reports_status_and_leaves_telemetry_to_station() {
         let mut player = LocalPlayer::default();
         player.role = Some(CrewRole::Pilot);
-        player.id = Some(2);
+        player.id = Some(shared::PlayerId(2));
         player.joined = true;
         let state = GameState {
             submarine: Some(shared::SubmarineState {
@@ -691,7 +1122,7 @@ mod tests {
         assert!(hud.contains("PILOTE"));
         assert!(hud.contains("PARTIE EN COURS"));
         assert!(!hud.contains("90.0 deg"));
-        assert!(hud.contains("CommandNotAllowedForRole"));
+        assert!(hud.contains("COMMANDE INTERDITE POUR CE POSTE"));
     }
 
     #[test]
@@ -733,5 +1164,45 @@ mod tests {
             ),
             PlayerCommand::SetDepth(0.0)
         ));
+    }
+
+    #[test]
+    fn room_code_requires_exactly_six_digits() {
+        assert!(valid_room_code("000001"));
+        assert!(!valid_room_code("11"));
+        assert!(!valid_room_code("00000A"));
+        assert!(!valid_room_code("0000001"));
+    }
+
+    #[test]
+    fn setup_errors_have_readable_labels() {
+        assert_eq!(
+            error_label(&ProtocolError::RoomNotFound),
+            "SALLE INTROUVABLE"
+        );
+        assert_eq!(
+            error_label(&ProtocolError::RoleAlreadyTaken(CrewRole::Pilot)),
+            "POSTE DEJA PRIS : PILOTE"
+        );
+        assert_eq!(
+            error_label(&ProtocolError::ConnectionFailed),
+            "CONNEXION AU SERVEUR IMPOSSIBLE"
+        );
+    }
+
+    #[test]
+    fn station_panels_stay_hidden_until_session_is_joined() {
+        let mut player = LocalPlayer::default();
+        player.role = Some(CrewRole::Pilot);
+        player.request = Some(RoomRequest::Join(RoomId("999999".to_owned())));
+
+        assert_eq!(selector_visibility(&player), Visibility::Visible);
+        assert_eq!(pilot_visibility(&player, false), Visibility::Hidden);
+
+        player.id = Some(shared::PlayerId(1));
+
+        assert_eq!(selector_visibility(&player), Visibility::Hidden);
+        assert_eq!(pilot_visibility(&player, false), Visibility::Hidden);
+        assert_eq!(pilot_visibility(&player, true), Visibility::Visible);
     }
 }

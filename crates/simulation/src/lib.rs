@@ -1,4 +1,4 @@
-use shared::{GameEvent, PlayerCommand, SubmarineState};
+use shared::{GameEvent, MissionConfig, PilotOrder, PlayerCommand, SubmarineState};
 
 const MAX_SPEED_KNOTS: f32 = 20.0;
 const MAX_DEPTH_METERS: f32 = 1_000.0;
@@ -6,12 +6,20 @@ const KNOTS_TO_METERS_PER_SECOND: f32 = 0.514_444;
 
 pub struct Simulation {
     pub state: SubmarineState,
+    pub config: MissionConfig,
+    pub tick: u64,
 }
 
 impl Simulation {
     pub fn new() -> Self {
+        Self::with_config(MissionConfig { seed: 0 })
+    }
+
+    pub fn with_config(config: MissionConfig) -> Self {
         Self {
             state: SubmarineState::default(),
+            config,
+            tick: 0,
         }
     }
 
@@ -24,6 +32,7 @@ impl Simulation {
         let heading = self.state.heading.to_radians();
         self.state.x += heading.sin() * distance;
         self.state.y += heading.cos() * distance;
+        self.tick = self.tick.wrapping_add(1);
 
         vec![]
     }
@@ -53,6 +62,18 @@ impl Simulation {
             _ => {}
         }
         vec![]
+    }
+
+    pub fn apply_pilot_order(&mut self, order: PilotOrder) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        for command in [
+            PlayerCommand::SetHeading(order.heading),
+            PlayerCommand::SetSpeed(order.speed),
+            PlayerCommand::SetDepth(order.depth),
+        ] {
+            events.extend(self.apply_command(command));
+        }
+        events
     }
 }
 
@@ -151,5 +172,29 @@ mod tests {
         let mut sim = Simulation::new();
         let events = sim.tick(0.1);
         assert!(events.is_empty());
+        assert_eq!(sim.tick, 1);
+    }
+
+    #[test]
+    fn same_seed_and_orders_are_deterministic() {
+        let config = MissionConfig { seed: 1234 };
+        let order = PilotOrder {
+            heading: 72.0,
+            speed: 11.0,
+            depth: 80.0,
+        };
+        let mut first = Simulation::with_config(config);
+        let mut second = Simulation::with_config(config);
+
+        first.apply_pilot_order(order);
+        second.apply_pilot_order(order);
+        for _ in 0..100 {
+            first.tick(0.05);
+            second.tick(0.05);
+        }
+
+        assert_eq!(first.config, second.config);
+        assert_eq!(first.tick, second.tick);
+        assert_eq!(first.state, second.state);
     }
 }

@@ -90,7 +90,7 @@ Le premier périmètre ne dépend d'aucun service externe métier. L'identité p
 | Serveur HTTP | Axum | exposer `/ws` et accepter l'upgrade WebSocket |
 | Boucle de jeu | Tokio + canal `mpsc` | ordonner les commandes et avancer la simulation |
 
-En production, le navigateur doit construire dynamiquement une URL `wss://` à partir de l'origine de la page ou d'une configuration explicite. L'adresse locale codée en dur actuelle est réservée au développement et doit disparaître avant un test sur téléphone réel.
+Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trunk sert la page sur le port de développement `8080`, il conserve le nom d'hôte et cible le serveur sur `3000` ; l'exécution native accepte `WS_URL`.
 
 ## 4. Stratégie de solution
 
@@ -107,15 +107,15 @@ En production, le navigateur doit construire dynamiquement une URL `wss://` à p
 
 | Domaine | Existant | Cible |
 |---|---|---|
-| Lobby | un lobby global, démarrage à cinq rôles | plusieurs salles, démarrage dès un joueur, prêts et bots |
+| Lobby | registre en mémoire, codes courts, rôles uniques, prêts, démarrage explicite dès un joueur et bots | persistance et reprise éventuelles |
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
 | Navigation | consignes appliquées instantanément | consignes, valeurs réelles, inertie, plongée et ballasts |
 | Sonar | commande sans effet | observations, pistes incertaines et signature acoustique |
 | Armement | événement de tir immédiat | tubes, solution de tir et entités torpilles |
 | Ingénierie | état minimal et réparation sans mutation | énergie, batterie, air, compartiments, avaries et réparations temporisées |
-| IA | absente | bots de poste et navires ennemis déterministes |
-| Client | sélection de rôle, HUD et poste pilote | cinq interfaces responsive et état de reconnexion |
-| Protocole | enveloppes minimales non versionnées | version, salle, séquences, reprise et erreurs structurées |
+| IA | ordre structuré du capitaine au bot Pilote | autres bots de poste et navires ennemis déterministes |
+| Client | création/rejoint de salle, lobby tactile minimal, HUD, poste pilote et ordre au bot Pilote | cinq interfaces responsive et état de reconnexion |
+| Protocole | version 1, identifiants opaques, messages lobby/mission, tick et snapshot | reprise et projections par rôle |
 
 ## 5. Vue des blocs de construction
 
@@ -146,16 +146,16 @@ C4Container
 **Existant :**
 
 - `CrewRole`, `SystemId`, `SystemStatus` et `SubmarineState` ;
-- `PlayerCommand`, `GameEvent`, erreurs et enveloppes ;
+- enveloppes versionnées, identifiants de salle/session/joueur/commande et séparation lobby/mission ;
+- état de lobby, configuration de mission, tick et snapshot numérotés ;
+- `PlayerCommand`, `GameEvent` et erreurs liées aux commandes ;
 - codec `postcard`.
 
 **Cible :**
 
-- identifiants opaques de salle, joueur, entité, piste et commande ;
-- `ProtocolVersion` et informations de compatibilité ;
-- commandes de lobby séparées des commandes de mission ;
+- identifiants opaques d'entité et de piste ;
+- négociation de plusieurs versions et informations de compatibilité ;
 - vues observables par rôle, sans exposer l'état secret de l'ennemi ;
-- numéro de snapshot et tick serveur ;
 - types d'erreur stables et affichables.
 
 `shared` ne doit pas contenir de logique d'IA, de minuterie, de socket ni d'élément Bevy.
@@ -182,7 +182,7 @@ Les systèmes sont exécutés dans un ordre stable à chaque tick. Toute dépend
 
 ### 5.4 Crate `server`
 
-**Existant :** route WebSocket, lobby global, attribution des rôles, validation des commandes et tâche de simulation à 20 Hz.
+**Existant :** route WebSocket, registre de salles en mémoire, attribution de rôles uniques, prêts, démarrage explicite, validation des commandes et une tâche de simulation à 20 Hz par salle.
 
 **Composants cibles :**
 
@@ -200,7 +200,7 @@ Une salle possède une seule file séquentielle de commandes. Un client lent ne 
 
 ### 5.5 Crate `client`
 
-**Existant :** connexion `ewebsock` en ressource `NonSend`, sélecteur de rôle, état réseau, interpolation et interface du pilote.
+**Existant :** connexion `ewebsock` en ressource `NonSend`, URL dérivée de l'origine, création/rejoint de salle, sélection de rôle, lobby minimal, interpolation, interface du pilote et ordre tactile du capitaine au bot Pilote.
 
 **Composants cibles :**
 
@@ -281,7 +281,7 @@ sequenceDiagram
 
 - serveur Axum sur `0.0.0.0:3000` ;
 - client Trunk sur `127.0.0.1:8080` ;
-- WebSocket local `ws://127.0.0.1:3000/ws` ;
+- WebSocket dérivé de l'hôte de la page (`:3000` avec Trunk en développement) ;
 - aucun stockage persistant requis.
 
 ### 7.2 Cible de production
@@ -395,9 +395,9 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | R-03 | calculs `f32` non reproductibles entre cibles | moyen | quantification ou nombres fixes si les rejeux inter-cibles l'exigent |
 | R-04 | surcharge réseau par snapshots complets | moyen | mesurer d'abord, puis projections compactes et snapshots remplaçables |
 | R-05 | IA ennemie utilisant accidentellement l'état omniscient | élevé | API de perception dédiée et tests de visibilité |
-| TD-01 | URL WebSocket locale codée en dur | bloque mobile/déploiement | configuration par origine avant tests distants |
-| TD-02 | lobby global et démarrage à cinq joueurs | bloque le mode retenu | introduire salles, prêts et bots en premier jalon |
-| TD-03 | protocole non versionné | migration risquée | version et fixtures avant extension importante |
+| TD-01 | URL WebSocket locale codée en dur | résolu en M1 | URL dérivée de l'origine et configuration native `WS_URL` |
+| TD-02 | lobby global et démarrage à cinq joueurs | résolu en M1 | registre en mémoire, prêts, démarrage explicite et bots |
+| TD-03 | protocole non versionné | résolu en M1 | version 1 et fixtures exactes `postcard` |
 | TD-04 | commandes sonar, réparation et tir principalement symboliques | jeu non fonctionnel | remplacer par vertical slices de domaine |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
 

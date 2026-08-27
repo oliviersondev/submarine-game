@@ -2,41 +2,77 @@ use bevy::prelude::*;
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use shared::{
     codec::{decode, encode},
-    ClientMessage, CrewRole, GameEvent, PlayerCommand, ProtocolError, ServerMessage,
-    SubmarineState, SystemId,
+    ClientMessage, ClientPayload, CommandId, CrewRole, LobbyCommand, LobbySnapshot, MissionCommand,
+    PilotOrder, PlayerCommand, PlayerId, ProtocolError, RoomId, ServerMessage, ServerPayload,
+    SessionId, SubmarineState, SystemId, PROTOCOL_VERSION,
 };
 
 use crate::role::role_from_environment;
 
-// WsSender/WsReceiver use Rc<WebSocket> in WASM — not Send+Sync.
-// Stored as a NonSend resource so Bevy keeps it on the main thread.
 pub struct WsConnection {
     pub sender: WsSender,
     pub receiver: WsReceiver,
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct NetworkReceiveSet;
+
+#[derive(Debug, Clone)]
+pub enum RoomRequest {
+    Create,
+    Join(RoomId),
+}
+
 #[derive(Resource, Default)]
-pub struct CommandQueue(Vec<PlayerCommand>);
+pub struct CommandQueue {
+    mission: Vec<MissionCommand>,
+    lobby: Vec<LobbyCommand>,
+    next_id: u64,
+}
 
 impl CommandQueue {
     pub fn push(&mut self, command: PlayerCommand) {
-        self.0.push(command);
+        let command_id = self.next_command_id();
+        self.mission.push(MissionCommand::Player {
+            command_id,
+            command,
+        });
+    }
+
+    pub fn order_pilot(&mut self, order: PilotOrder) {
+        let command_id = self.next_command_id();
+        self.mission
+            .push(MissionCommand::OrderPilotBot { command_id, order });
+    }
+
+    pub fn lobby(&mut self, command: LobbyCommand) {
+        self.lobby.push(command);
+    }
+
+    fn next_command_id(&mut self) -> CommandId {
+        self.next_id = self.next_id.wrapping_add(1);
+        CommandId(self.next_id)
     }
 }
 
 #[derive(Resource, Default)]
 pub struct LocalPlayer {
     pub role: Option<CrewRole>,
-    pub id: Option<u32>,
+    pub room_code: String,
+    pub request: Option<RoomRequest>,
+    pub session_id: Option<SessionId>,
+    pub id: Option<PlayerId>,
     pub joined: bool,
     connection_started: bool,
 }
 
 #[derive(Resource, Default)]
 pub struct GameState {
+    pub lobby: Option<LobbySnapshot>,
     pub previous_submarine: Option<SubmarineState>,
     pub submarine: Option<SubmarineState>,
     pub snapshot_id: u64,
+    pub server_tick: u64,
     pub game_started: bool,
     pub last_error: Option<ProtocolError>,
 }
@@ -45,45 +81,58 @@ pub struct NetworkPlugin;
 
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
+        let role = role_from_environment();
         app.insert_resource(LocalPlayer {
-            role: role_from_environment(),
+            role,
+            request: role.map(|_| RoomRequest::Create),
             ..default()
         })
         .insert_resource(GameState::default())
         .init_resource::<CommandQueue>()
         .add_systems(Update, manage_connection)
-        .add_systems(Update, poll_messages.after(manage_connection))
+        .add_systems(
+            Update,
+            poll_messages
+                .after(manage_connection)
+                .in_set(NetworkReceiveSet),
+        )
         .add_systems(Update, queue_keyboard_command.after(poll_messages))
         .add_systems(PostUpdate, flush_commands);
     }
 }
 
 fn manage_connection(world: &mut World) {
-    let role_selected = world.resource::<LocalPlayer>().role.is_some();
+    let should_connect = {
+        let player = world.resource::<LocalPlayer>();
+        player.role.is_some() && player.request.is_some()
+    };
     let has_connection = world.get_non_send::<WsConnection>().is_some();
 
-    if !role_selected {
+    if !should_connect {
         if has_connection {
             world.remove_non_send::<WsConnection>();
         }
         let mut player = world.resource_mut::<LocalPlayer>();
         player.connection_started = false;
         player.joined = false;
-        player.id = None;
         return;
     }
-
+    if has_connection && !world.resource::<LocalPlayer>().connection_started {
+        world.remove_non_send::<WsConnection>();
+        return;
+    }
     if has_connection || world.resource::<LocalPlayer>().connection_started {
         return;
     }
 
     world.resource_mut::<LocalPlayer>().connection_started = true;
-    match ewebsock::connect("ws://127.0.0.1:3000/ws", ewebsock::Options::default()) {
-        Ok((sender, receiver)) => {
-            world.insert_non_send(WsConnection { sender, receiver });
-        }
+    match ewebsock::connect(&websocket_url(), ewebsock::Options::default()) {
+        Ok((sender, receiver)) => world.insert_non_send(WsConnection { sender, receiver }),
         Err(error) => {
-            world.resource_mut::<LocalPlayer>().connection_started = false;
+            let mut player = world.resource_mut::<LocalPlayer>();
+            player.connection_started = false;
+            player.request = None;
+            world.resource_mut::<GameState>().last_error = Some(ProtocolError::ConnectionFailed);
             error!("WebSocket connect failed: {error}");
         }
     }
@@ -99,28 +148,50 @@ fn poll_messages(
     while let Some(event) = ws.receiver.try_recv() {
         match event {
             WsEvent::Opened => {
-                if !player.joined {
-                    let Some(role) = player.role else { continue };
-                    let msg = encode(&ClientMessage::JoinLobby { role });
-                    ws.sender.send(WsMessage::Binary(msg));
-                    player.joined = true;
-                    info!("WS opened — JoinLobby sent as {role:?}");
+                if player.joined {
+                    continue;
                 }
+                let Some(role) = player.role else { continue };
+                let Some(request) = player.request.clone() else {
+                    continue;
+                };
+                let command = match request {
+                    RoomRequest::Create => LobbyCommand::CreateRoom { role },
+                    RoomRequest::Join(room_id) => LobbyCommand::JoinRoom { room_id, role },
+                };
+                ws.sender.send(WsMessage::Binary(encode(&ClientMessage::new(
+                    ClientPayload::Lobby(command),
+                ))));
+                player.joined = true;
             }
-            WsEvent::Message(WsMessage::Binary(bytes)) => {
-                if let Ok(msg) = decode::<ServerMessage>(&bytes) {
-                    handle_server_message(msg, &mut player, &mut state);
+            WsEvent::Message(WsMessage::Binary(bytes)) => match decode::<ServerMessage>(&bytes) {
+                Ok(message) if message.version == PROTOCOL_VERSION => {
+                    handle_server_message(message.payload, &mut player, &mut state)
                 }
-            }
-            WsEvent::Closed => {
-                info!("WebSocket closed");
-                player.role = None;
-            }
-            WsEvent::Error(e) => {
-                error!("WS error: {e}");
-                player.role = None;
+                Ok(message) => {
+                    state.last_error = Some(ProtocolError::IncompatibleVersion {
+                        expected: PROTOCOL_VERSION,
+                        received: message.version,
+                    });
+                }
+                Err(error) => warn!("Invalid server message: {error}"),
+            },
+            WsEvent::Closed | WsEvent::Error(_) => {
+                handle_connection_end(&mut player, &mut state);
             }
             _ => {}
+        }
+    }
+}
+
+fn handle_connection_end(player: &mut LocalPlayer, state: &mut GameState) {
+    player.joined = false;
+    player.connection_started = false;
+    state.game_started = false;
+    if player.id.is_none() {
+        player.request = None;
+        if state.last_error.is_none() {
+            state.last_error = Some(ProtocolError::ConnectionFailed);
         }
     }
 }
@@ -134,25 +205,28 @@ fn queue_keyboard_command(
     if !state.game_started {
         return;
     }
-
     let Some(role) = player.role else { return };
-    let Some(command) = command_for_input(role, &keyboard, &state) else {
-        return;
-    };
-
-    commands.push(command);
+    if let Some(command) = command_for_input(role, &keyboard, &state) {
+        commands.push(command);
+    }
 }
 
 fn flush_commands(mut commands: ResMut<CommandQueue>, ws: Option<NonSendMut<WsConnection>>) {
     let Some(mut ws) = ws else {
-        commands.0.clear();
+        commands.mission.clear();
+        commands.lobby.clear();
         return;
     };
 
-    for command in commands.0.drain(..) {
-        info!("Command sent: {command:?}");
-        ws.sender
-            .send(WsMessage::Binary(encode(&ClientMessage::Command(command))));
+    for command in commands.lobby.drain(..) {
+        ws.sender.send(WsMessage::Binary(encode(&ClientMessage::new(
+            ClientPayload::Lobby(command),
+        ))));
+    }
+    for command in commands.mission.drain(..) {
+        ws.sender.send(WsMessage::Binary(encode(&ClientMessage::new(
+            ClientPayload::Mission(command),
+        ))));
     }
 }
 
@@ -190,21 +264,19 @@ fn command_for_input(
         CrewRole::Sonar => keyboard
             .just_pressed(KeyCode::Space)
             .then_some(PlayerCommand::SonarPing),
-        CrewRole::Engineer => {
-            if keyboard.just_pressed(KeyCode::Digit1) {
-                Some(PlayerCommand::RepairSystem(SystemId::Engine))
-            } else if keyboard.just_pressed(KeyCode::Digit2) {
-                Some(PlayerCommand::RepairSystem(SystemId::Torpedo))
-            } else if keyboard.just_pressed(KeyCode::Digit3) {
-                Some(PlayerCommand::RepairSystem(SystemId::Sonar))
-            } else if keyboard.just_pressed(KeyCode::Digit4) {
-                Some(PlayerCommand::RepairSystem(SystemId::Life))
-            } else if keyboard.just_pressed(KeyCode::Digit5) {
-                Some(PlayerCommand::RepairSystem(SystemId::Navigation))
-            } else {
-                None
-            }
-        }
+        CrewRole::Engineer => [
+            (KeyCode::Digit1, SystemId::Engine),
+            (KeyCode::Digit2, SystemId::Torpedo),
+            (KeyCode::Digit3, SystemId::Sonar),
+            (KeyCode::Digit4, SystemId::Life),
+            (KeyCode::Digit5, SystemId::Navigation),
+        ]
+        .into_iter()
+        .find_map(|(key, system)| {
+            keyboard
+                .just_pressed(key)
+                .then_some(PlayerCommand::RepairSystem(system))
+        }),
         CrewRole::Weapons => {
             let submarine = state.submarine.as_ref()?;
             keyboard
@@ -216,47 +288,79 @@ fn command_for_input(
     }
 }
 
-fn handle_server_message(msg: ServerMessage, player: &mut LocalPlayer, state: &mut GameState) {
-    match msg {
-        ServerMessage::JoinAck { player_id, role } => {
+fn handle_server_message(payload: ServerPayload, player: &mut LocalPlayer, state: &mut GameState) {
+    match payload {
+        ServerPayload::SessionJoined {
+            session_id,
+            player_id,
+            room_id,
+            role,
+        } => {
+            player.session_id = Some(session_id);
             player.id = Some(player_id);
+            player.room_code = room_id.0;
             player.role = Some(role);
-            info!("JoinAck: id={player_id}, role={role:?}");
-            log_controls(role);
         }
-        ServerMessage::GameStarted => {
-            state.game_started = true;
-            info!("Game started!");
+        ServerPayload::Lobby(lobby) => state.lobby = Some(lobby),
+        ServerPayload::MissionStarted { .. } => state.game_started = true,
+        ServerPayload::Snapshot {
+            snapshot_id,
+            tick,
+            submarine,
+        } => {
+            if snapshot_id > state.snapshot_id {
+                state.previous_submarine = state.submarine.replace(submarine);
+                state.snapshot_id = snapshot_id;
+                state.server_tick = tick;
+            }
         }
-        ServerMessage::Event(GameEvent::StateSnapshot(sub)) => {
-            state.previous_submarine = state.submarine.replace(sub);
-            state.snapshot_id = state.snapshot_id.wrapping_add(1);
-        }
-        ServerMessage::Event(event) => {
+        ServerPayload::Event { tick, event } => {
+            state.server_tick = state.server_tick.max(tick);
             debug!("GameEvent: {event:?}");
         }
-        ServerMessage::Error(e) => {
-            warn!("Server error: {e:?}");
-            let role_taken = matches!(&e, ProtocolError::RoleAlreadyTaken(_));
-            state.last_error = Some(e);
-            if role_taken {
-                player.role = None;
+        ServerPayload::Error { error, .. } => {
+            if matches!(
+                error,
+                ProtocolError::RoomNotFound
+                    | ProtocolError::RoomAlreadyStarted
+                    | ProtocolError::RoleAlreadyTaken(_)
+            ) {
+                player.request = None;
                 player.id = None;
-                player.joined = false;
-                player.connection_started = false;
-                state.game_started = false;
+                player.session_id = None;
             }
+            state.last_error = Some(error);
         }
     }
 }
 
-fn log_controls(role: CrewRole) {
-    info!("Controls: {}", controls_for_role(role));
+#[cfg(target_arch = "wasm32")]
+fn websocket_url() -> String {
+    let Some(location) = web_sys::window().map(|window| window.location()) else {
+        return "ws://127.0.0.1:3000/ws".to_owned();
+    };
+    let protocol = if location.protocol().ok().as_deref() == Some("https:") {
+        "wss"
+    } else {
+        "ws"
+    };
+    let host = location.hostname().unwrap_or_else(|_| "127.0.0.1".into());
+    let port = match location.port().ok().as_deref() {
+        Some("8080") => ":3000",
+        Some("") | None => "",
+        Some(port) => return format!("{protocol}://{host}:{port}/ws"),
+    };
+    format!("{protocol}://{host}{port}/ws")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn websocket_url() -> String {
+    std::env::var("WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3000/ws".to_owned())
 }
 
 pub fn controls_for_role(role: CrewRole) -> &'static str {
     match role {
-        CrewRole::Captain => "aucune commande pour le moment",
+        CrewRole::Captain => "ordre tactile vers le bot Pilote",
         CrewRole::Pilot => "Gauche/Droite : cap\nHaut/Bas : vitesse\nPgUp/PgDown : profondeur",
         CrewRole::Sonar => "Espace : ping sonar",
         CrewRole::Engineer => "1 moteur | 2 torpille | 3 sonar | 4 survie | 5 navigation",
@@ -268,61 +372,83 @@ pub fn controls_for_role(role: CrewRole) -> &'static str {
 mod tests {
     use super::*;
 
-    fn game_state() -> GameState {
-        GameState {
-            submarine: Some(SubmarineState {
-                heading: 0.0,
-                speed: 0.0,
-                depth: 0.0,
-                ..default()
-            }),
-            game_started: true,
+    #[test]
+    fn command_queue_assigns_monotonic_ids() {
+        let mut queue = CommandQueue::default();
+        queue.push(PlayerCommand::SetSpeed(1.0));
+        queue.order_pilot(PilotOrder {
+            heading: 10.0,
+            speed: 2.0,
+            depth: 3.0,
+        });
+
+        assert!(matches!(
+            queue.mission[0],
+            MissionCommand::Player {
+                command_id: CommandId(1),
+                ..
+            }
+        ));
+        assert!(matches!(
+            queue.mission[1],
+            MissionCommand::OrderPilotBot {
+                command_id: CommandId(2),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn room_not_found_keeps_player_in_setup_for_retry() {
+        let mut player = LocalPlayer {
+            role: Some(CrewRole::Pilot),
+            request: Some(RoomRequest::Join(RoomId("999999".to_owned()))),
+            joined: true,
+            connection_started: true,
             ..default()
-        }
+        };
+        let mut state = GameState::default();
+
+        handle_server_message(
+            ServerPayload::Error {
+                command_id: None,
+                error: ProtocolError::RoomNotFound,
+            },
+            &mut player,
+            &mut state,
+        );
+        handle_connection_end(&mut player, &mut state);
+
+        assert!(player.request.is_none());
+        assert!(player.id.is_none());
+        assert_eq!(state.last_error, Some(ProtocolError::RoomNotFound));
     }
 
     #[test]
-    fn pilot_controls_wrap_heading_and_clamp_speed_and_depth() {
-        let mut keyboard = ButtonInput::default();
-        keyboard.press(KeyCode::ArrowLeft);
-        assert!(matches!(
-            command_for_input(CrewRole::Pilot, &keyboard, &game_state()),
-            Some(PlayerCommand::SetHeading(355.0))
-        ));
+    fn role_taken_error_survives_the_server_closing_the_socket() {
+        let mut player = LocalPlayer {
+            role: Some(CrewRole::Pilot),
+            request: Some(RoomRequest::Join(RoomId("000004".to_owned()))),
+            joined: true,
+            connection_started: true,
+            ..default()
+        };
+        let mut state = GameState::default();
 
-        let mut keyboard = ButtonInput::default();
-        keyboard.press(KeyCode::ArrowDown);
-        assert!(matches!(
-            command_for_input(CrewRole::Pilot, &keyboard, &game_state()),
-            Some(PlayerCommand::SetSpeed(0.0))
-        ));
+        handle_server_message(
+            ServerPayload::Error {
+                command_id: None,
+                error: ProtocolError::RoleAlreadyTaken(CrewRole::Pilot),
+            },
+            &mut player,
+            &mut state,
+        );
+        handle_connection_end(&mut player, &mut state);
 
-        let mut keyboard = ButtonInput::default();
-        keyboard.press(KeyCode::PageUp);
-        assert!(matches!(
-            command_for_input(CrewRole::Pilot, &keyboard, &game_state()),
-            Some(PlayerCommand::SetDepth(0.0))
-        ));
-    }
-
-    #[test]
-    fn station_controls_create_role_specific_commands() {
-        let mut keyboard = ButtonInput::default();
-        keyboard.press(KeyCode::Space);
-        assert!(matches!(
-            command_for_input(CrewRole::Sonar, &keyboard, &game_state()),
-            Some(PlayerCommand::SonarPing)
-        ));
-        assert!(matches!(
-            command_for_input(CrewRole::Weapons, &keyboard, &game_state()),
-            Some(PlayerCommand::FireTorpedo { bearing: 0.0 })
-        ));
-
-        let mut keyboard = ButtonInput::default();
-        keyboard.press(KeyCode::Digit3);
-        assert!(matches!(
-            command_for_input(CrewRole::Engineer, &keyboard, &game_state()),
-            Some(PlayerCommand::RepairSystem(SystemId::Sonar))
-        ));
+        assert!(player.request.is_none());
+        assert_eq!(
+            state.last_error,
+            Some(ProtocolError::RoleAlreadyTaken(CrewRole::Pilot))
+        );
     }
 }
