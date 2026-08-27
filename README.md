@@ -28,7 +28,7 @@ Les commandes clavier permettent de tester le flux réseau avant l'ajout des int
 | `Weapons` | `Espace` tir dans le cap actuel |
 | `Captain` | Aucune commande pour le moment |
 
-Le HUD affiche le rôle, l'état du lobby, les dernières valeurs autoritaires de cap/vitesse/profondeur, les raccourcis disponibles et la dernière erreur renvoyée par le serveur.
+Le HUD affiche le rôle, l'état du lobby, les dernières valeurs autoritaires de cap/vitesse/profondeur, les raccourcis disponibles et la dernière erreur renvoyée par le serveur. Le poste Pilote dispose aussi de jauges et de boutons souris/tactiles pour régler le cap, la vitesse et la profondeur.
 
 ## Architecture
 

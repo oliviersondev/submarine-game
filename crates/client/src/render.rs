@@ -1,7 +1,7 @@
 use bevy::prelude::*;
-use shared::{CrewRole, ProtocolError};
+use shared::{CrewRole, PlayerCommand, ProtocolError, SubmarineState};
 
-use crate::network::{controls_for_role, GameState, LocalPlayer};
+use crate::network::{controls_for_role, CommandQueue, GameState, LocalPlayer};
 
 #[derive(Component)]
 struct SubmarineMarker;
@@ -24,6 +24,28 @@ struct SelectorErrorText;
 #[derive(Component)]
 struct RoleChoice(CrewRole);
 
+#[derive(Component)]
+struct PilotPanel;
+
+#[derive(Clone, Copy, Component)]
+enum PilotMetric {
+    Heading,
+    Speed,
+    Depth,
+}
+
+#[derive(Component)]
+struct PilotTelemetry(PilotMetric);
+
+#[derive(Component)]
+struct PilotGaugeFill(PilotMetric);
+
+#[derive(Component)]
+struct PilotControl {
+    metric: PilotMetric,
+    direction: f32,
+}
+
 #[derive(Resource, Default)]
 struct InterpolationState {
     snapshot_id: u64,
@@ -45,7 +67,9 @@ impl Plugin for RenderPlugin {
                     update_hud,
                     update_panel_visibility,
                     update_selector_error,
+                    update_pilot_station,
                     role_button_system,
+                    pilot_button_system,
                 ),
             );
     }
@@ -201,10 +225,147 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
         GlobalZIndex(20),
         selector_visibility(&player),
     ));
+
+    spawn_pilot_station(&mut commands, &player);
+}
+
+fn spawn_pilot_station(commands: &mut Commands, player: &LocalPlayer) {
+    commands
+        .spawn((
+            PilotPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(16),
+                right: px(16),
+                bottom: px(16),
+                max_width: px(760),
+                min_height: px(214),
+                padding: UiRect::all(px(14)),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(8)),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.94)),
+            BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.75)),
+            GlobalZIndex(20),
+            pilot_visibility(player),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new("POSTE PILOTE // NAVIGATION"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.82, 0.95, 1.0)),
+            ));
+
+            for (metric, label) in [
+                (PilotMetric::Heading, "CAP"),
+                (PilotMetric::Speed, "VITESSE"),
+                (PilotMetric::Depth, "PROFONDEUR"),
+            ] {
+                panel
+                    .spawn(Node {
+                        width: percent(100),
+                        min_height: px(46),
+                        align_items: AlignItems::Center,
+                        column_gap: px(6),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new(label),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.55, 0.72, 0.78)),
+                            Node {
+                                width: px(66),
+                                ..default()
+                            },
+                        ));
+                        spawn_pilot_button(row, metric, -1.0, "-");
+                        row.spawn((
+                            Node {
+                                height: px(8),
+                                flex_grow: 1.0,
+                                min_width: px(24),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.03, 0.12, 0.16)),
+                        ))
+                        .with_child((
+                            PilotGaugeFill(metric),
+                            Node {
+                                width: percent(0),
+                                height: percent(100),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.2, 0.75, 0.9)),
+                        ));
+                        row.spawn((
+                            PilotTelemetry(metric),
+                            Text::new("---"),
+                            TextFont {
+                                font_size: FontSize::Px(14.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                            Node {
+                                width: px(64),
+                                ..default()
+                            },
+                        ));
+                        spawn_pilot_button(row, metric, 1.0, "+");
+                    });
+            }
+        });
+}
+
+fn spawn_pilot_button(
+    parent: &mut ChildSpawnerCommands,
+    metric: PilotMetric,
+    direction: f32,
+    label: &'static str,
+) {
+    parent
+        .spawn((
+            PilotControl { metric, direction },
+            Button,
+            Node {
+                width: px(36),
+                height: px(38),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        ))
+        .with_child((
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(20.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+        ));
 }
 
 fn selector_visibility(player: &LocalPlayer) -> Visibility {
     if player.role.is_none() {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    }
+}
+
+fn pilot_visibility(player: &LocalPlayer) -> Visibility {
+    if player.role == Some(CrewRole::Pilot) {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -275,22 +436,56 @@ fn update_hud(
 fn update_panel_visibility(
     player: Res<LocalPlayer>,
     mut panels: Query<
-        (&mut Visibility, Option<&HudPanel>, Option<&RoleSelector>),
-        Or<(With<HudPanel>, With<RoleSelector>)>,
+        (
+            &mut Visibility,
+            Option<&HudPanel>,
+            Option<&RoleSelector>,
+            Option<&PilotPanel>,
+        ),
+        Or<(With<HudPanel>, With<RoleSelector>, With<PilotPanel>)>,
     >,
 ) {
     if !player.is_changed() {
         return;
     }
 
-    for (mut visibility, hud, selector) in &mut panels {
+    for (mut visibility, hud, selector, pilot) in &mut panels {
         *visibility = if (hud.is_some() && player.role.is_some())
             || (selector.is_some() && player.role.is_none())
+            || (pilot.is_some() && player.role == Some(CrewRole::Pilot))
         {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+fn update_pilot_station(
+    state: Res<GameState>,
+    mut telemetry: Query<(&PilotTelemetry, &mut Text)>,
+    mut gauges: Query<(&PilotGaugeFill, &mut Node)>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+
+    for (telemetry, mut text) in &mut telemetry {
+        text.0 = state
+            .submarine
+            .as_ref()
+            .map(|submarine| pilot_metric_text(telemetry.0, submarine))
+            .unwrap_or_else(|| "---".to_owned());
+    }
+
+    for (gauge, mut node) in &mut gauges {
+        node.width = percent(
+            state
+                .submarine
+                .as_ref()
+                .map(|submarine| pilot_metric_percent(gauge.0, submarine))
+                .unwrap_or(0.0),
+        );
     }
 }
 
@@ -330,6 +525,60 @@ fn role_button_system(
     }
 }
 
+fn pilot_button_system(
+    mut buttons: Query<
+        (&Interaction, &PilotControl, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    state: Res<GameState>,
+    mut commands: ResMut<CommandQueue>,
+) {
+    for (interaction, control, mut background) in &mut buttons {
+        *background = match interaction {
+            Interaction::Pressed => {
+                if state.game_started {
+                    if let Some(submarine) = &state.submarine {
+                        commands.push(pilot_command(control, submarine));
+                    }
+                }
+                BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
+            }
+            Interaction::Hovered => BackgroundColor(Color::srgb(0.06, 0.28, 0.36)),
+            Interaction::None => BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        };
+    }
+}
+
+fn pilot_command(control: &PilotControl, submarine: &SubmarineState) -> PlayerCommand {
+    match control.metric {
+        PilotMetric::Heading => PlayerCommand::SetHeading(
+            (submarine.heading + control.direction * 5.0).rem_euclid(360.0),
+        ),
+        PilotMetric::Speed => {
+            PlayerCommand::SetSpeed((submarine.speed + control.direction).clamp(0.0, 20.0))
+        }
+        PilotMetric::Depth => PlayerCommand::SetDepth(
+            (submarine.depth + control.direction * 10.0).clamp(0.0, 1_000.0),
+        ),
+    }
+}
+
+fn pilot_metric_text(metric: PilotMetric, submarine: &SubmarineState) -> String {
+    match metric {
+        PilotMetric::Heading => format!("{:>5.1} deg", submarine.heading),
+        PilotMetric::Speed => format!("{:>5.1} kn", submarine.speed),
+        PilotMetric::Depth => format!("{:>5.0} m", submarine.depth),
+    }
+}
+
+fn pilot_metric_percent(metric: PilotMetric, submarine: &SubmarineState) -> f32 {
+    match metric {
+        PilotMetric::Heading => submarine.heading.rem_euclid(360.0) / 360.0 * 100.0,
+        PilotMetric::Speed => submarine.speed.clamp(0.0, 20.0) / 20.0 * 100.0,
+        PilotMetric::Depth => submarine.depth.clamp(0.0, 1_000.0) / 1_000.0 * 100.0,
+    }
+}
+
 fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
     let Some(role) = player.role else {
         return "SUBMARINE // SELECTION DU POSTE".to_owned();
@@ -360,14 +609,18 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
         .map(|error| format!("\n\nERREUR SERVEUR\n{error:?}"))
         .unwrap_or_default();
 
-    format!(
-        "SUBMARINE // {}\n{}\n\n{}\n\nCOMMANDES\n{}{}",
-        role_label(role),
-        status,
-        telemetry,
-        controls_for_role(role),
-        error
-    )
+    if role == CrewRole::Pilot {
+        format!("SUBMARINE // {}\n{}{}", role_label(role), status, error)
+    } else {
+        format!(
+            "SUBMARINE // {}\n{}\n\n{}\n\nCOMMANDES\n{}{}",
+            role_label(role),
+            status,
+            telemetry,
+            controls_for_role(role),
+            error
+        )
+    }
 }
 
 fn role_label(role: CrewRole) -> &'static str {
@@ -416,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn hud_reports_role_status_telemetry_and_error() {
+    fn pilot_hud_reports_status_and_leaves_telemetry_to_station() {
         let mut player = LocalPlayer::default();
         player.role = Some(CrewRole::Pilot);
         player.id = Some(2);
@@ -437,7 +690,48 @@ mod tests {
 
         assert!(hud.contains("PILOTE"));
         assert!(hud.contains("PARTIE EN COURS"));
-        assert!(hud.contains("90.0 deg"));
+        assert!(!hud.contains("90.0 deg"));
         assert!(hud.contains("CommandNotAllowedForRole"));
+    }
+
+    #[test]
+    fn pilot_station_commands_wrap_and_clamp_values() {
+        let submarine = SubmarineState {
+            heading: 358.0,
+            speed: 20.0,
+            depth: 0.0,
+            ..default()
+        };
+
+        assert!(matches!(
+            pilot_command(
+                &PilotControl {
+                    metric: PilotMetric::Heading,
+                    direction: 1.0,
+                },
+                &submarine,
+            ),
+            PlayerCommand::SetHeading(3.0)
+        ));
+        assert!(matches!(
+            pilot_command(
+                &PilotControl {
+                    metric: PilotMetric::Speed,
+                    direction: 1.0,
+                },
+                &submarine,
+            ),
+            PlayerCommand::SetSpeed(20.0)
+        ));
+        assert!(matches!(
+            pilot_command(
+                &PilotControl {
+                    metric: PilotMetric::Depth,
+                    direction: -1.0,
+                },
+                &submarine,
+            ),
+            PlayerCommand::SetDepth(0.0)
+        ));
     }
 }

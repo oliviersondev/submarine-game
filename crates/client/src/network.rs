@@ -16,6 +16,15 @@ pub struct WsConnection {
 }
 
 #[derive(Resource, Default)]
+pub struct CommandQueue(Vec<PlayerCommand>);
+
+impl CommandQueue {
+    pub fn push(&mut self, command: PlayerCommand) {
+        self.0.push(command);
+    }
+}
+
+#[derive(Resource, Default)]
 pub struct LocalPlayer {
     pub role: Option<CrewRole>,
     pub id: Option<u32>,
@@ -41,9 +50,11 @@ impl Plugin for NetworkPlugin {
             ..default()
         })
         .insert_resource(GameState::default())
+        .init_resource::<CommandQueue>()
         .add_systems(Update, manage_connection)
         .add_systems(Update, poll_messages.after(manage_connection))
-        .add_systems(Update, send_keyboard_command.after(poll_messages));
+        .add_systems(Update, queue_keyboard_command.after(poll_messages))
+        .add_systems(PostUpdate, flush_commands);
     }
 }
 
@@ -114,11 +125,11 @@ fn poll_messages(
     }
 }
 
-fn send_keyboard_command(
+fn queue_keyboard_command(
     keyboard: Res<ButtonInput<KeyCode>>,
     player: Res<LocalPlayer>,
     state: Res<GameState>,
-    ws: Option<NonSendMut<WsConnection>>,
+    mut commands: ResMut<CommandQueue>,
 ) {
     if !state.game_started {
         return;
@@ -128,11 +139,21 @@ fn send_keyboard_command(
     let Some(command) = command_for_input(role, &keyboard, &state) else {
         return;
     };
-    let Some(mut ws) = ws else { return };
 
-    info!("Command sent: {command:?}");
-    ws.sender
-        .send(WsMessage::Binary(encode(&ClientMessage::Command(command))));
+    commands.push(command);
+}
+
+fn flush_commands(mut commands: ResMut<CommandQueue>, ws: Option<NonSendMut<WsConnection>>) {
+    let Some(mut ws) = ws else {
+        commands.0.clear();
+        return;
+    };
+
+    for command in commands.0.drain(..) {
+        info!("Command sent: {command:?}");
+        ws.sender
+            .send(WsMessage::Binary(encode(&ClientMessage::Command(command))));
+    }
 }
 
 fn command_for_input(
