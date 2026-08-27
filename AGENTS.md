@@ -4,7 +4,7 @@
 
 - Use `make check-all` for normal verification: native-check `shared`, `simulation`, and `server`, then check `client` for `wasm32-unknown-unknown`.
 - Do not use a native client check as the main signal; Bevy's native audio stack may require system ALSA development libraries, while the supported client target is WASM/WebGL2.
-- Run native unit tests with `make test`; run one test with `cargo test -p <package> <test_name>` (for example, `cargo test -p simulation heading_updates`).
+- `make test` covers only `simulation` and `server`; client unit tests exist but have no supported runner in the Makefile. Run one native test with `cargo test -p <package> <test_name>` (for example, `cargo test -p simulation heading_updates`).
 - Development requires two long-running processes: `make server` on `0.0.0.0:3000` and `make client` on `127.0.0.1:8080`.
 - Build the deployable client with `make build-wasm`; Trunk writes to `crates/client/dist/`.
 - `rust-toolchain.toml` installs stable Rust plus native Linux and `wasm32-unknown-unknown`. Bevy 0.19 requires Rust 1.95 or newer.
@@ -26,9 +26,17 @@
 - The client connects to `ws://127.0.0.1:3000/ws` only after role selection. `?role=pilot` (or another `CrewRole` name) bypasses the selector for development.
 - Rendering interpolates `x`, `y`, and heading over the 50 ms snapshot interval; `GameState::submarine` remains the latest authoritative state used for commands.
 
+## Design Sources
+
+- Start at `docs/README.md`: `game-design.md` defines intended rules, `architecture.md` separates current and target architecture, and `roadmap.md` orders work as vertical slices.
+- Treat target features in `docs/` as design, not implemented behavior. The executable code and manifests remain the source of truth for current behavior.
+- Keep gameplay rules deterministic and server-authoritative. Update the GDD for rule changes, architecture docs for boundary/protocol changes, and the roadmap for scope or priority changes.
+
 ## Current Limitations
 
 - The current lobby is one in-memory global lobby, starts when all five unique roles join, and has no persistence or reconnection flow.
 - Role-based command validation belongs in `game_room.rs`; rejected commands must not reach `Simulation` and the error must only be sent to the originating role.
 - `Simulation::tick` applies basic nautical movement but produces no physics events. There are no collisions, inertia, or buoyancy yet.
-- There is no CI, formatter/linter config, Dockerfile, or deployment config in the repository yet; do not infer those workflows from the roadmap.
+- Sonar ping has no effect, repair emits an event without mutating system state, and firing emits an event without creating a torpedo.
+- The README calls the client a PWA, but there is no manifest or service worker yet. The hard-coded localhost WebSocket also prevents normal use from a remote phone.
+- There is no CI, formatter/linter config, Dockerfile, or deployment config; do not infer those workflows from the roadmap.

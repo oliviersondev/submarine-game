@@ -2,6 +2,16 @@
 
 Jeu coopératif multijoueur 2D de sous-marin en Rust. Les joueurs incarnent différents membres d'équipage et se connectent via WebSocket à une simulation autoritaire côté serveur. Le client compile en WebAssembly et est servi comme Progressive Web App.
 
+## Documentation de conception
+
+La direction produit et technique est décrite dans [`docs/`](docs/README.md) :
+
+- [Game Design Document](docs/game-design.md) : vision, rôles et règles de simulation ;
+- [Architecture](docs/architecture.md) : état actuel, cible et contraintes techniques ;
+- [Roadmap](docs/roadmap.md) : vertical slices et critères de validation.
+
+Les documents distinguent explicitement le prototype actuel des fonctionnalités cibles.
+
 ## Vue d'ensemble
 
 Jusqu'à 5 joueurs rejoignent une même salle, chacun avec un rôle distinct :
