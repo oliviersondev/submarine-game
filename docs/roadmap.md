@@ -1,7 +1,7 @@
 # Roadmap de conception et de développement
 
 **Version :** 0.1  
-**Date :** 27 août 2026  
+**Date :** 28 août 2026  
 **Statut :** proposée
 
 Cette roadmap transforme le prototype réseau actuel en une mission de sous-marin jouable. Elle privilégie les vertical slices : chaque jalon doit relier règles, protocole, serveur et interface plutôt que terminer un système isolé invisible pour le joueur.
@@ -143,6 +143,10 @@ Les livrables M1 ci-dessus sont présents sous forme minimale : salles éphémè
 ### Critère de validation
 
 Un joueur accompagné de bots peut quitter la surface, atteindre une profondeur donnée, naviguer silencieusement puis remonter avant épuisement de ses ressources.
+
+### État implémenté au 28 août 2026
+
+M2 est livré avec un protocole v2 sans compatibilité v1 : configuration centralisée du bâtiment, consignes distinctes des mesures réelles, inertie horizontale et verticale, états de plongée, ballasts, remontée d'urgence, propulsion diesel-électrique, batterie, oxygène, charge et signature acoustique qualitative. Le serveur valide les commandes Pilote et Ingénierie, automatise l'Ingénierie lorsqu'elle est tenue par un bot et produit des projections propres aux rôles. Le client fournit des postes tactiles Pilote et Ingénierie ainsi que le bruit et les alertes partagés. Les valeurs d'endurance restent provisoires jusqu'aux tests d'équilibrage ; la distribution électrique détaillée et les avaries restent prévues pour M5.
 
 ## 7. M3 - Détection et poste sonar
 

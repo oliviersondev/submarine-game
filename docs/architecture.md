@@ -1,7 +1,7 @@
 # Architecture de Submarine Game
 
 **Version :** 0.1  
-**Date :** 27 août 2026  
+**Date :** 28 août 2026  
 **Statut :** architecture actuelle documentée, architecture cible proposée
 
 Ce document suit une structure arc42 allégée. Les éléments marqués **existant** décrivent le dépôt actuel. Les éléments marqués **cible** décrivent l'architecture nécessaire au jeu défini dans le [Game Design Document](game-design.md).
@@ -109,13 +109,13 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 |---|---|---|
 | Lobby | registre en mémoire, codes courts, rôles uniques, prêts, démarrage explicite dès un joueur et bots | persistance et reprise éventuelles |
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
-| Navigation | consignes appliquées instantanément | consignes, valeurs réelles, inertie, plongée et ballasts |
+| Navigation | consignes et valeurs réelles, inertie, plongée, ballasts et remontée d'urgence | assiette, stabilité et effets des avaries |
 | Sonar | commande sans effet | observations, pistes incertaines et signature acoustique |
 | Armement | événement de tir immédiat | tubes, solution de tir et entités torpilles |
-| Ingénierie | état minimal et réparation sans mutation | énergie, batterie, air, compartiments, avaries et réparations temporisées |
+| Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation et recharge | distribution détaillée, compartiments, avaries et réparations temporisées |
 | IA | ordre structuré du capitaine au bot Pilote | autres bots de poste et navires ennemis déterministes |
-| Client | création/rejoint de salle, lobby tactile minimal, HUD, poste pilote et ordre au bot Pilote | cinq interfaces responsive et état de reconnexion |
-| Protocole | version 1, identifiants opaques, messages lobby/mission, tick et snapshot | reprise et projections par rôle |
+| Client | lobby tactile, poste Pilote inertiel, poste Ingénierie, bruit et alertes partagées | cinq interfaces responsive et état de reconnexion |
+| Protocole | version 2, identifiants opaques, commandes M2, tick et projections par rôle | reprise et vues des contacts observables |
 
 ## 5. Vue des blocs de construction
 
@@ -162,7 +162,7 @@ C4Container
 
 ### 5.3 Crate `simulation`
 
-**Existant :** `Simulation::new`, déplacement nautique simple, normalisation des consignes et quelques événements symboliques.
+**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil et automatisation minimale de l'Ingénierie bot.
 
 **Composants cibles :**
 
@@ -182,7 +182,7 @@ Les systèmes sont exécutés dans un ordre stable à chaque tick. Toute dépend
 
 ### 5.4 Crate `server`
 
-**Existant :** route WebSocket, registre de salles en mémoire, attribution de rôles uniques, prêts, démarrage explicite, validation des commandes et une tâche de simulation à 20 Hz par salle.
+**Existant :** route WebSocket, registre de salles en mémoire, attribution de rôles uniques, prêts, démarrage explicite, validation des commandes, projections M2 par rôle et une tâche de simulation à 20 Hz par salle.
 
 **Composants cibles :**
 
@@ -397,7 +397,7 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | R-05 | IA ennemie utilisant accidentellement l'état omniscient | élevé | API de perception dédiée et tests de visibilité |
 | TD-01 | URL WebSocket locale codée en dur | résolu en M1 | URL dérivée de l'origine et configuration native `WS_URL` |
 | TD-02 | lobby global et démarrage à cinq joueurs | résolu en M1 | registre en mémoire, prêts, démarrage explicite et bots |
-| TD-03 | protocole non versionné | résolu en M1 | version 1 et fixtures exactes `postcard` |
+| TD-03 | protocole non versionné | résolu en M1, évolué en M2 | version 2 et fixtures exactes `postcard` |
 | TD-04 | commandes sonar, réparation et tir principalement symboliques | jeu non fonctionnel | remplacer par vertical slices de domaine |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
 

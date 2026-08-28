@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use shared::{
-    CommandId, CrewRole, MissionConfig, PilotOrder, PlayerCommand, PlayerId, ProtocolError,
-    ServerMessage, ServerPayload,
+    CommandId, CommonMeasurements, CrewRole, DiveState, EngineeringMeasurements, MissionConfig,
+    PilotMeasurements, PilotOrder, PlayerCommand, PlayerId, ProtocolError, ServerMessage,
+    ServerPayload, SubmarineSnapshot,
 };
 use simulation::Simulation;
 use tokio::sync::mpsc;
@@ -33,15 +34,14 @@ pub async fn run(
     loop {
         tokio::select! {
             _ = ticker.tick() => {
+                if !human_roles.contains(&CrewRole::Engineer) {
+                    sim.automate_engineer();
+                }
                 for event in sim.tick(0.05) {
                     broadcast(&players, ServerPayload::Event { tick: sim.tick, event });
                 }
                 snapshot_id = snapshot_id.wrapping_add(1);
-                broadcast(&players, ServerPayload::Snapshot {
-                    snapshot_id,
-                    tick: sim.tick,
-                    submarine: sim.state.clone(),
-                });
+                send_snapshots(&players, &sim, snapshot_id);
             }
             result = cmd_rx.recv() => {
                 match result {
@@ -106,9 +106,20 @@ fn command_allowed_for_role(role: CrewRole, command: &PlayerCommand) -> bool {
         (role, command),
         (
             CrewRole::Pilot,
-            PlayerCommand::SetHeading(_) | PlayerCommand::SetDepth(_) | PlayerCommand::SetSpeed(_)
+            PlayerCommand::SetHeading(_)
+                | PlayerCommand::SetDepth(_)
+                | PlayerCommand::SetSpeed(_)
+                | PlayerCommand::SetBallast(_)
+                | PlayerCommand::EmergencySurface
         ) | (CrewRole::Sonar, PlayerCommand::SonarPing)
-            | (CrewRole::Engineer, PlayerCommand::RepairSystem(_))
+            | (
+                CrewRole::Engineer,
+                PlayerCommand::RepairSystem(_)
+                    | PlayerCommand::SetDiesels(_)
+                    | PlayerCommand::SetElectricMotors(_)
+                    | PlayerCommand::SetVentilation(_)
+                    | PlayerCommand::SetBatteryCharging(_)
+            )
             | (CrewRole::Weapons, PlayerCommand::FireTorpedo { .. })
     )
 }
@@ -130,6 +141,62 @@ fn broadcast(
     let message = ServerMessage::new(payload);
     for (_, tx) in players.values() {
         let _ = tx.try_send(message.clone());
+    }
+}
+
+fn send_snapshots(
+    players: &HashMap<PlayerId, (CrewRole, mpsc::Sender<ServerMessage>)>,
+    sim: &Simulation,
+    snapshot_id: u64,
+) {
+    for (role, tx) in players.values() {
+        let _ = tx.try_send(ServerMessage::new(ServerPayload::Snapshot {
+            snapshot_id,
+            tick: sim.tick,
+            submarine: project_submarine(sim, *role),
+        }));
+    }
+}
+
+fn project_submarine(sim: &Simulation, role: CrewRole) -> SubmarineSnapshot {
+    let state = &sim.state;
+    let parameters = sim.config.submarine;
+    let common = CommonMeasurements {
+        x: state.x,
+        y: state.y,
+        heading: state.heading,
+        speed: state.speed,
+        depth: state.depth,
+        dive_state: state.dive_state,
+        acoustic_level: state.acoustic_level,
+        alerts: sim.active_alerts(),
+    };
+    let pilot = (role == CrewRole::Pilot).then_some(PilotMeasurements {
+        ordered_heading: state.ordered_heading,
+        ordered_speed: state.ordered_speed,
+        ordered_depth: state.ordered_depth,
+        turn_rate: state.turn_rate,
+        vertical_speed: state.vertical_speed,
+        ballast: state.ballast,
+        emergency_surface: state.emergency_surface,
+        max_speed: if state.dive_state == DiveState::Surface {
+            parameters.max_surface_speed
+        } else {
+            parameters.max_submerged_speed
+        },
+        max_depth: parameters.crush_depth,
+    });
+    let engineering = (role == CrewRole::Engineer).then_some(EngineeringMeasurements {
+        propulsion: state.propulsion,
+        battery: state.battery,
+        oxygen: state.oxygen,
+        electrical_load: state.electrical_load,
+        air_intake_available: sim.air_intake_available(),
+    });
+    SubmarineSnapshot {
+        common,
+        pilot,
+        engineering,
     }
 }
 
@@ -183,9 +250,9 @@ mod tests {
             ),
         );
 
-        assert_eq!(sim.state.heading, 80.0);
-        assert_eq!(sim.state.speed, 9.0);
-        assert_eq!(sim.state.depth, 60.0);
+        assert_eq!(sim.state.ordered_heading, 80.0);
+        assert_eq!(sim.state.ordered_speed, 9.0);
+        assert_eq!(sim.state.ordered_depth, 60.0);
     }
 
     #[test]
@@ -224,7 +291,7 @@ mod tests {
 
     #[test]
     fn two_room_simulations_evolve_independently() {
-        let config = MissionConfig { seed: 44 };
+        let config = MissionConfig::new(44);
         let mut first = Simulation::with_config(config);
         let mut second = Simulation::with_config(config);
         first.apply_command(PlayerCommand::SetSpeed(10.0));
@@ -233,6 +300,51 @@ mod tests {
         second.tick(1.0);
 
         assert_ne!(first.state, second.state);
-        assert_eq!(second.state, shared::SubmarineState::default());
+        assert_eq!(second.state.x, 0.0);
+        assert_eq!(second.state.y, 0.0);
+        assert_eq!(second.state.speed, 0.0);
+    }
+
+    #[test]
+    fn role_policy_covers_m2_commands() {
+        assert!(command_allowed_for_role(
+            CrewRole::Pilot,
+            &PlayerCommand::SetBallast(shared::BallastState::Flood)
+        ));
+        assert!(command_allowed_for_role(
+            CrewRole::Pilot,
+            &PlayerCommand::EmergencySurface
+        ));
+        assert!(command_allowed_for_role(
+            CrewRole::Engineer,
+            &PlayerCommand::SetDiesels(true)
+        ));
+        assert!(command_allowed_for_role(
+            CrewRole::Engineer,
+            &PlayerCommand::SetBatteryCharging(true)
+        ));
+        assert!(!command_allowed_for_role(
+            CrewRole::Pilot,
+            &PlayerCommand::SetDiesels(true)
+        ));
+        assert!(!command_allowed_for_role(
+            CrewRole::Engineer,
+            &PlayerCommand::SetDepth(40.0)
+        ));
+    }
+
+    #[test]
+    fn projections_only_include_role_specific_measurements() {
+        let sim = Simulation::new();
+        let pilot = project_submarine(&sim, CrewRole::Pilot);
+        let engineer = project_submarine(&sim, CrewRole::Engineer);
+        let sonar = project_submarine(&sim, CrewRole::Sonar);
+
+        assert!(pilot.pilot.is_some());
+        assert!(pilot.engineering.is_none());
+        assert!(engineer.pilot.is_none());
+        assert!(engineer.engineering.is_some());
+        assert!(sonar.pilot.is_none());
+        assert!(sonar.engineering.is_none());
     }
 }

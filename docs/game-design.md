@@ -1,7 +1,7 @@
 # Game Design Document - Submarine Game
 
 **Version :** 0.1  
-**Date :** 27 août 2026  
+**Date :** 28 août 2026  
 **Statut :** brouillon de conception  
 **Référence d'inspiration :** *Wolfpack* (Usurpator AB), pour sa coopération par postes et ses systèmes interdépendants. Le présent jeu reste une création 2D originale dans un univers fictif.
 
@@ -133,7 +133,7 @@ Le capitaine ne contrôle pas directement les instruments des joueurs présents.
 - remplissage ou chasse des ballasts ;
 - arrêt d'urgence et remontée d'urgence.
 
-Le cap, la vitesse et la profondeur ne changent plus instantanément dans la cible de conception. Le sous-marin possède une accélération, un taux de virage et une vitesse verticale limités.
+Le cap, la vitesse et la profondeur suivent des consignes distinctes des mesures réelles. Le sous-marin possède une accélération, un taux de virage et une vitesse verticale limités.
 
 ### 4.3 Sonar
 
@@ -234,6 +234,19 @@ Le mouvement dépend de la vitesse réelle, pas directement de la consigne. Les 
 | Profondeur opérationnelle | 150 m |
 | Profondeur critique | 220 m |
 | Profondeur d'écrasement nominale | 250 m |
+
+Les paramètres M2 suivants sont provisoires et centralisés dans `SubmarineConfig`. Ils servent à rendre la boucle d'endurance testable avant les sessions d'équilibrage :
+
+| Paramètre M2 | Valeur provisoire |
+|---|---:|
+| Accélération / décélération | 0,75 / 1,25 nœud/s |
+| Taux de virage maximal | 4°/s |
+| Vitesse verticale normale / urgence | 1,5 / 3 m/s |
+| Décharge électrique de base | 0,01 point/s |
+| Décharge propulsion à plein régime | 0,18 point/s |
+| Recharge diesel | 0,25 point/s |
+| Consommation / ventilation d'oxygène | 0,015 / 0,5 point/s |
+| Seuil batterie basse / air critique | 20 % / 15 % |
 
 Au-delà de la profondeur critique, la coque subit des tests de résistance périodiques. La probabilité de dégâts augmente avec la profondeur, les avaries existantes et le temps passé sous la limite.
 

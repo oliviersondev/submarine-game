@@ -58,7 +58,7 @@ impl RoomRegistry {
         self.rooms.insert(
             room_id.clone(),
             Room {
-                config: MissionConfig { seed: room_number },
+                config: MissionConfig::new(room_number),
                 phase: LobbyPhase::Waiting,
                 players: HashMap::new(),
                 game_cmd_tx: None,

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use shared::{
-    CrewRole, LobbyCommand, PilotOrder, PlayerCommand, ProtocolError, RoleOccupant, RoomId,
-    SubmarineState,
+    AlertKind, BallastState, CrewRole, EngineeringMeasurements, LobbyCommand, PilotOrder,
+    PlayerCommand, ProtocolError, RoleOccupant, RoomId, SubmarineSnapshot,
 };
 
 use crate::network::{controls_for_role, CommandQueue, GameState, LocalPlayer, RoomRequest};
@@ -21,6 +21,15 @@ struct HudPanel;
 
 #[derive(Component)]
 struct RoleSelector;
+
+#[derive(Component)]
+struct SelectorCard;
+
+#[derive(Component)]
+struct SelectorRoles;
+
+#[derive(Component)]
+struct SelectorRoom;
 
 #[derive(Component)]
 struct SelectorErrorText;
@@ -56,6 +65,20 @@ struct LobbyPanel;
 #[derive(Component)]
 struct PilotPanel;
 
+#[derive(Component)]
+struct EngineerPanel;
+
+#[derive(Component)]
+struct EngineerTelemetry;
+
+#[derive(Clone, Copy, Component)]
+enum EngineerControl {
+    Diesels,
+    ElectricMotors,
+    Ventilation,
+    Charging,
+}
+
 #[derive(Clone, Copy, Component)]
 enum PilotMetric {
     Heading,
@@ -75,6 +98,15 @@ struct PilotControl {
     direction: f32,
 }
 
+#[derive(Component)]
+struct PilotStatus;
+
+#[derive(Clone, Copy, Component)]
+enum PilotAction {
+    Ballast(BallastState),
+    EmergencySurface,
+}
+
 #[derive(Resource, Default)]
 struct InterpolationState {
     snapshot_id: u64,
@@ -82,6 +114,12 @@ struct InterpolationState {
 }
 
 const SNAPSHOT_INTERVAL_SECONDS: f32 = 0.05;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectorLayout {
+    Portrait,
+    Landscape,
+}
 
 pub struct RenderPlugin;
 
@@ -99,15 +137,44 @@ impl Plugin for RenderPlugin {
                     update_room_code,
                     update_pilot_station,
                     update_lobby_action_layout,
+                    update_selector_layout,
+                    update_station_layout,
                     role_button_system,
                     setup_button_system,
                     room_code_input,
                     code_key_system,
                     lobby_button_system,
                     pilot_button_system,
+                    pilot_action_system,
+                    engineer_button_system,
                 ),
             );
+
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(PreUpdate, sync_canvas_to_viewport);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_canvas_to_viewport(mut window: Single<&mut Window, With<PrimaryWindow>>) {
+    let Some(browser) = web_sys::window() else {
+        return;
+    };
+    let Some(width) = browser.inner_width().ok().and_then(|value| value.as_f64()) else {
+        return;
+    };
+    let Some(height) = browser.inner_height().ok().and_then(|value| value.as_f64()) else {
+        return;
+    };
+    let (width, height) = (width as f32, height as f32);
+
+    if viewport_size_changed(window.width(), window.height(), width, height) {
+        window.resolution.set(width, height);
+    }
+}
+
+fn viewport_size_changed(current_width: f32, current_height: f32, width: f32, height: f32) -> bool {
+    (current_width - width).abs() > 0.5 || (current_height - height).abs() > 0.5
 }
 
 fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
@@ -149,227 +216,239 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
         },
     ));
 
-    commands.spawn((
-        RoleSelector,
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(32),
-            left: px(16),
-            right: px(16),
-            max_width: px(520),
-            height: px(580),
-            border: UiRect::all(px(1)),
-            border_radius: BorderRadius::all(px(8)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.96)),
-        BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.85)),
-        GlobalZIndex(10),
-        selector_visibility(&player),
-    ));
-
-    commands.spawn((
-        RoleSelector,
-        Text::new("CHOISISSEZ VOTRE POSTE"),
-        TextFont {
-            font_size: FontSize::Px(22.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.82, 0.95, 1.0)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(52),
-            left: px(34),
-            ..default()
-        },
-        GlobalZIndex(20),
-        selector_visibility(&player),
-    ));
-
-    commands.spawn((
-        RoleSelector,
-        Text::new("La connexion demarre apres la selection."),
-        TextFont {
-            font_size: FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.55, 0.72, 0.78)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(84),
-            left: px(34),
-            ..default()
-        },
-        GlobalZIndex(20),
-        selector_visibility(&player),
-    ));
-
-    for (index, (role, label)) in [
-        (CrewRole::Captain, "CAPITAINE"),
-        (CrewRole::Pilot, "PILOTE"),
-        (CrewRole::Sonar, "SONAR"),
-        (CrewRole::Engineer, "INGENIEUR"),
-        (CrewRole::Weapons, "ARMEMENT"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        commands.spawn((
-            RoleSelector,
-            RoleChoice(role),
-            Button,
-            Text::new(format!("{label}  //  {}", role_summary(role))),
-            TextFont {
-                font_size: FontSize::Px(16.0),
-                ..default()
-            },
-            TextColor(Color::srgb(0.82, 0.95, 1.0)),
-            Node {
-                position_type: PositionType::Absolute,
-                top: px(142.0 + index as f32 * 50.0),
-                left: px(34),
-                right: px(34),
-                max_width: px(484),
-                height: px(42),
-                padding: UiRect::axes(px(14), px(9)),
-                border: UiRect::all(px(1)),
-                border_radius: BorderRadius::all(px(4)),
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
-            BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.2)),
-            GlobalZIndex(20),
-            selector_visibility(&player),
-        ));
-    }
-
-    for digit in 0..10 {
-        commands.spawn((
-            RoleSelector,
-            CodeKey::Digit(char::from_digit(digit, 10).unwrap()),
-            Button,
-            Text::new(digit.to_string()),
-            TextFont {
-                font_size: FontSize::Px(17.0),
-                ..default()
-            },
-            TextColor(Color::srgb(0.82, 0.95, 1.0)),
-            Node {
-                position_type: PositionType::Absolute,
-                top: px(386.0 + (digit / 5) as f32 * 48.0),
-                left: px(34.0 + (digit % 5) as f32 * 50.0),
-                width: px(44),
-                height: px(44),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border_radius: BorderRadius::all(px(4)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
-            GlobalZIndex(20),
-            selector_visibility(&player),
-        ));
-    }
-
-    commands.spawn((
-        RoleSelector,
-        RoomCodeText,
-        Text::new("CODE SALLE : ------"),
-        TextFont {
-            font_size: FontSize::Px(16.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.82, 0.95, 1.0)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(486),
-            left: px(34),
-            ..default()
-        },
-        GlobalZIndex(20),
-        selector_visibility(&player),
-    ));
-
-    commands.spawn((
-        RoleSelector,
-        CodeKey::Delete,
-        Button,
-        Text::new("EFFACER"),
-        TextFont {
-            font_size: FontSize::Px(13.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.82, 0.95, 1.0)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(478),
-            left: px(276),
-            width: px(90),
-            height: px(44),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            border_radius: BorderRadius::all(px(4)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
-        GlobalZIndex(20),
-        selector_visibility(&player),
-    ));
-
-    for (action, label, left) in [
-        (SetupAction::Create, "CREER", 34.0),
-        (SetupAction::Join, "REJOINDRE", 174.0),
-    ] {
-        commands.spawn((
-            RoleSelector,
-            action,
-            Button,
-            Text::new(label),
-            TextFont {
-                font_size: FontSize::Px(16.0),
-                ..default()
-            },
-            TextColor(Color::srgb(0.82, 0.95, 1.0)),
-            Node {
-                position_type: PositionType::Absolute,
-                top: px(530),
-                left: px(left),
-                width: px(128),
-                height: px(44),
-                padding: UiRect::axes(px(14), px(10)),
-                border_radius: BorderRadius::all(px(4)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
-            GlobalZIndex(20),
-            selector_visibility(&player),
-        ));
-    }
-
-    commands.spawn((
-        RoleSelector,
-        SelectorErrorText,
-        Text::new(""),
-        TextFont {
-            font_size: FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(Color::srgb(1.0, 0.45, 0.35)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(108),
-            left: px(34),
-            right: px(34),
-            max_width: px(484),
-            ..default()
-        },
-        GlobalZIndex(20),
-        selector_visibility(&player),
-    ));
+    spawn_role_selector(&mut commands, &player);
 
     spawn_pilot_station(&mut commands, &player);
+    spawn_engineer_station(&mut commands, &player);
     spawn_lobby_actions(&mut commands, &player);
+}
+
+fn spawn_role_selector(commands: &mut Commands, player: &LocalPlayer) {
+    commands
+        .spawn((
+            RoleSelector,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(0),
+                left: px(0),
+                right: px(0),
+                bottom: px(0),
+                padding: UiRect::all(px(6)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            GlobalZIndex(10),
+            selector_visibility(player),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                SelectorCard,
+                Node {
+                    width: percent(100),
+                    max_width: px(520),
+                    max_height: percent(100),
+                    padding: UiRect::all(px(10)),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(8)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(8),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.96)),
+                BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.85)),
+            ))
+            .with_children(|card| {
+                card.spawn((
+                    SelectorRoles,
+                    Node {
+                        width: percent(100),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
+                        ..default()
+                    },
+                ))
+                .with_children(|roles| {
+                    roles.spawn((
+                        Text::new("CHOISISSEZ VOTRE POSTE"),
+                        TextFont {
+                            font_size: FontSize::Px(22.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                    ));
+                    roles.spawn((
+                        Text::new("Selectionnez un poste."),
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.55, 0.72, 0.78)),
+                    ));
+                    roles.spawn((
+                        SelectorErrorText,
+                        Text::new(""),
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(1.0, 0.45, 0.35)),
+                        Node::default(),
+                    ));
+
+                    for (role, label) in [
+                        (CrewRole::Captain, "CAPITAINE"),
+                        (CrewRole::Pilot, "PILOTE"),
+                        (CrewRole::Sonar, "SONAR"),
+                        (CrewRole::Engineer, "INGENIEUR"),
+                        (CrewRole::Weapons, "ARMEMENT"),
+                    ] {
+                        roles.spawn((
+                            RoleChoice(role),
+                            Button,
+                            Text::new(format!("{label}  //  {}", role_summary(role))),
+                            TextFont {
+                                font_size: FontSize::Px(16.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                            Node {
+                                width: percent(100),
+                                height: px(44),
+                                padding: UiRect::horizontal(px(10)),
+                                border: UiRect::all(px(1)),
+                                border_radius: BorderRadius::all(px(4)),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+                            BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.2)),
+                        ));
+                    }
+                });
+
+                card.spawn((
+                    SelectorRoom,
+                    Node {
+                        width: percent(100),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(6),
+                        ..default()
+                    },
+                ))
+                .with_children(|room| {
+                    room.spawn(Node {
+                        width: percent(100),
+                        height: px(44),
+                        align_items: AlignItems::Center,
+                        column_gap: px(6),
+                        ..default()
+                    })
+                    .with_children(|code| {
+                        code.spawn((
+                            RoomCodeText,
+                            Text::new("CODE SALLE : ------"),
+                            TextFont {
+                                font_size: FontSize::Px(16.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                            Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            },
+                        ));
+                        code.spawn((
+                            CodeKey::Delete,
+                            Button,
+                            Text::new("EFFACER"),
+                            TextFont {
+                                font_size: FontSize::Px(13.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                            Node {
+                                width: px(90),
+                                height: px(44),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+                        ));
+                    });
+
+                    room.spawn(Node {
+                        width: percent(100),
+                        column_gap: px(4),
+                        row_gap: px(4),
+                        flex_wrap: FlexWrap::Wrap,
+                        ..default()
+                    })
+                    .with_children(|keypad| {
+                        for digit in 0..10 {
+                            keypad.spawn((
+                                CodeKey::Digit(char::from_digit(digit, 10).unwrap()),
+                                Button,
+                                Text::new(digit.to_string()),
+                                TextFont {
+                                    font_size: FontSize::Px(17.0),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                                Node {
+                                    width: percent(18),
+                                    min_width: px(44),
+                                    height: px(44),
+                                    flex_grow: 1.0,
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    border_radius: BorderRadius::all(px(4)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+                            ));
+                        }
+                    });
+
+                    room.spawn(Node {
+                        width: percent(100),
+                        height: px(44),
+                        column_gap: px(6),
+                        ..default()
+                    })
+                    .with_children(|actions| {
+                        for (action, label) in [
+                            (SetupAction::Create, "CREER"),
+                            (SetupAction::Join, "REJOINDRE"),
+                        ] {
+                            actions.spawn((
+                                action,
+                                Button,
+                                Text::new(label),
+                                TextFont {
+                                    font_size: FontSize::Px(16.0),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                                Node {
+                                    height: px(44),
+                                    min_width: px(128),
+                                    flex_grow: 1.0,
+                                    padding: UiRect::horizontal(px(14)),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    border_radius: BorderRadius::all(px(4)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+                            ));
+                        }
+                    });
+                });
+            });
+        });
 }
 
 fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
@@ -397,8 +476,9 @@ fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
                 top: px(top),
                 right: px(16),
                 width: px(220),
-                min_height: px(44),
-                padding: UiRect::all(px(12)),
+                height: px(44),
+                padding: UiRect::horizontal(px(12)),
+                align_items: AlignItems::Center,
                 border_radius: BorderRadius::all(px(4)),
                 ..default()
             },
@@ -413,10 +493,21 @@ fn update_lobby_action_layout(
     window: Single<&Window, With<PrimaryWindow>>,
     mut actions: Query<(&LobbyAction, &mut Node)>,
 ) {
-    let compact = window.width() < 800.0;
+    let landscape = compact_landscape(window.width(), window.height());
+    let compact = window.width() < 800.0 && !landscape;
 
     for (action, mut node) in &mut actions {
-        if compact {
+        if landscape {
+            node.top = Val::Auto;
+            node.bottom = px(match action {
+                LobbyAction::Ready => 68,
+                LobbyAction::Start | LobbyAction::OrderPilot => 16,
+            });
+            node.left = px(276);
+            node.right = px(16);
+            node.width = Val::Auto;
+            node.max_width = Val::Auto;
+        } else if compact {
             node.top = Val::Auto;
             node.bottom = px(match action {
                 LobbyAction::Ready => 68,
@@ -436,6 +527,120 @@ fn update_lobby_action_layout(
             node.right = px(16);
             node.width = px(220);
             node.max_width = Val::Auto;
+        }
+    }
+}
+
+fn update_selector_layout(
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut nodes: Query<
+        (
+            &mut Node,
+            Option<&SelectorCard>,
+            Option<&SelectorRoles>,
+            Option<&SelectorRoom>,
+        ),
+        Or<(With<SelectorCard>, With<SelectorRoles>, With<SelectorRoom>)>,
+    >,
+) {
+    let layout = selector_layout(window.width(), window.height());
+
+    for (mut node, card, roles, room) in &mut nodes {
+        if card.is_some() {
+            node.max_width = px(match layout {
+                SelectorLayout::Portrait => 520,
+                SelectorLayout::Landscape => 740,
+            });
+            node.flex_direction = match layout {
+                SelectorLayout::Portrait => FlexDirection::Column,
+                SelectorLayout::Landscape => FlexDirection::Row,
+            };
+            node.row_gap = px(match layout {
+                SelectorLayout::Portrait => 8,
+                SelectorLayout::Landscape => 0,
+            });
+            node.column_gap = px(match layout {
+                SelectorLayout::Portrait => 0,
+                SelectorLayout::Landscape => 12,
+            });
+        } else if roles.is_some() || room.is_some() {
+            match layout {
+                SelectorLayout::Portrait => {
+                    node.width = percent(100);
+                    node.flex_basis = Val::Auto;
+                    node.flex_grow = 0.0;
+                }
+                SelectorLayout::Landscape => {
+                    node.width = Val::Auto;
+                    node.flex_basis = px(0);
+                    node.flex_grow = 1.0;
+                }
+            }
+        }
+    }
+}
+
+fn selector_layout(width: f32, height: f32) -> SelectorLayout {
+    if compact_landscape(width, height) {
+        SelectorLayout::Landscape
+    } else {
+        SelectorLayout::Portrait
+    }
+}
+
+fn compact_landscape(width: f32, height: f32) -> bool {
+    width >= 600.0 && height <= 500.0
+}
+
+fn update_station_layout(
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut nodes: Query<
+        (
+            &mut Node,
+            Option<&HudPanel>,
+            Option<&PilotPanel>,
+            Option<&EngineerPanel>,
+        ),
+        Or<(With<HudPanel>, With<PilotPanel>, With<EngineerPanel>)>,
+    >,
+    mut hud_text: Single<&mut TextFont, With<HudText>>,
+) {
+    let landscape = compact_landscape(window.width(), window.height());
+    hud_text.font_size = FontSize::Px(if landscape { 13.0 } else { 17.0 });
+
+    for (mut node, hud, pilot, engineer) in &mut nodes {
+        if hud.is_some() {
+            node.left = px(16);
+            node.top = px(16);
+            if landscape {
+                node.right = Val::Auto;
+                node.bottom = px(16);
+                node.width = px(244);
+                node.max_width = px(260);
+            } else {
+                node.right = px(16);
+                node.bottom = Val::Auto;
+                node.width = Val::Auto;
+                node.max_width = px(520);
+            }
+        } else if pilot.is_some() || engineer.is_some() {
+            node.right = px(16);
+            node.bottom = px(16);
+            if landscape {
+                node.left = px(276);
+                node.top = px(16);
+                node.width = Val::Auto;
+                node.max_width = Val::Auto;
+                node.padding = UiRect::all(px(10));
+                node.row_gap = px(if pilot.is_some() { 4 } else { 6 });
+            } else {
+                node.left = px(16);
+                node.top = Val::Auto;
+                node.width = Val::Auto;
+                node.max_width = px(if pilot.is_some() { 760 } else { 620 });
+                node.padding = UiRect::all(px(14));
+                node.row_gap = px(if pilot.is_some() { 8 } else { 10 });
+            }
         }
     }
 }
@@ -534,6 +739,134 @@ fn spawn_pilot_station(commands: &mut Commands, player: &LocalPlayer) {
                         spawn_pilot_button(row, metric, 1.0, "+");
                     });
             }
+
+            panel.spawn((
+                PilotStatus,
+                Text::new("PLONGEE --- // BALLAST ---"),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 0.88, 0.92)),
+            ));
+            panel
+                .spawn(Node {
+                    width: percent(100),
+                    min_height: px(44),
+                    column_gap: px(6),
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (action, label) in [
+                        (PilotAction::Ballast(BallastState::Flood), "REMPLIR"),
+                        (PilotAction::Ballast(BallastState::Hold), "TENIR"),
+                        (PilotAction::Ballast(BallastState::Blow), "CHASSER"),
+                        (PilotAction::EmergencySurface, "SURFACE URGENCE"),
+                    ] {
+                        row.spawn((
+                            action,
+                            Button,
+                            Text::new(label),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                            Node {
+                                min_width: px(74),
+                                height: px(44),
+                                padding: UiRect::axes(px(10), px(8)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+                        ));
+                    }
+                });
+        });
+}
+
+fn spawn_engineer_station(commands: &mut Commands, player: &LocalPlayer) {
+    commands
+        .spawn((
+            EngineerPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(16),
+                right: px(16),
+                bottom: px(16),
+                max_width: px(620),
+                min_height: px(230),
+                padding: UiRect::all(px(14)),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(8)),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(10),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.94)),
+            BorderColor::all(Color::srgba(0.85, 0.65, 0.2, 0.8)),
+            GlobalZIndex(20),
+            engineer_visibility(player, false),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new("POSTE INGENIERIE // ENDURANCE"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.86, 0.5)),
+            ));
+            panel.spawn((
+                EngineerTelemetry,
+                Text::new("BATTERIE --- // OXYGENE --- // CHARGE ---"),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.82, 0.95, 1.0)),
+            ));
+            panel
+                .spawn(Node {
+                    width: percent(100),
+                    column_gap: px(8),
+                    row_gap: px(8),
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (control, label) in [
+                        (EngineerControl::Diesels, "DIESELS"),
+                        (EngineerControl::ElectricMotors, "MOTEURS ELEC."),
+                        (EngineerControl::Ventilation, "VENTILATION"),
+                        (EngineerControl::Charging, "RECHARGE"),
+                    ] {
+                        row.spawn((
+                            control,
+                            Button,
+                            Text::new(label),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                            Node {
+                                min_width: px(126),
+                                height: px(44),
+                                padding: UiRect::axes(px(10), px(8)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.12, 0.13, 0.08)),
+                        ));
+                    }
+                });
         });
 }
 
@@ -548,8 +881,8 @@ fn spawn_pilot_button(
             PilotControl { metric, direction },
             Button,
             Node {
-                width: px(36),
-                height: px(38),
+                width: px(44),
+                height: px(44),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border_radius: BorderRadius::all(px(4)),
@@ -593,6 +926,14 @@ fn pilot_visibility(player: &LocalPlayer, game_started: bool) -> Visibility {
     }
 }
 
+fn engineer_visibility(player: &LocalPlayer, game_started: bool) -> Visibility {
+    if player.role == Some(CrewRole::Engineer) && player.id.is_some() && game_started {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    }
+}
+
 fn update_submarine(
     time: Res<Time>,
     state: Res<GameState>,
@@ -616,13 +957,14 @@ fn update_submarine(
     let alpha = (interpolation.elapsed / SNAPSHOT_INTERVAL_SECONDS).clamp(0.0, 1.0);
     let previous = state.previous_submarine.as_ref().unwrap_or(current);
 
-    let x = lerp(previous.x, current.x, alpha);
-    let y = lerp(previous.y, current.y, alpha);
+    let x = lerp(previous.common.x, current.common.x, alpha);
+    let y = lerp(previous.common.y, current.common.y, alpha);
     transform.translation.x = x;
     transform.translation.y = y;
     transform.translation.z = 0.0;
-    transform.rotation =
-        Quat::from_rotation_z(-lerp_heading(previous.heading, current.heading, alpha).to_radians());
+    transform.rotation = Quat::from_rotation_z(
+        -lerp_heading(previous.common.heading, current.common.heading, alpha).to_radians(),
+    );
 
     if let Ok(mut camera) = camera.single_mut() {
         camera.translation.x = x;
@@ -663,6 +1005,7 @@ fn update_panel_visibility(
             Option<&HudPanel>,
             Option<&RoleSelector>,
             Option<&PilotPanel>,
+            Option<&EngineerPanel>,
             Option<&LobbyPanel>,
             Option<&LobbyAction>,
         ),
@@ -670,6 +1013,7 @@ fn update_panel_visibility(
             With<HudPanel>,
             With<RoleSelector>,
             With<PilotPanel>,
+            With<EngineerPanel>,
             With<LobbyPanel>,
         )>,
     >,
@@ -678,7 +1022,7 @@ fn update_panel_visibility(
         return;
     }
 
-    for (mut visibility, hud, selector, pilot, lobby, lobby_action) in &mut panels {
+    for (mut visibility, hud, selector, pilot, engineer, lobby, lobby_action) in &mut panels {
         let lobby_action_visible = lobby_action.is_some_and(|action| match action {
             LobbyAction::Ready | LobbyAction::Start => !state.game_started,
             LobbyAction::OrderPilot => state.game_started && player.role == Some(CrewRole::Captain),
@@ -687,6 +1031,10 @@ fn update_panel_visibility(
             || (selector.is_some() && player.id.is_none())
             || (pilot.is_some()
                 && player.role == Some(CrewRole::Pilot)
+                && player.id.is_some()
+                && state.game_started)
+            || (engineer.is_some()
+                && player.role == Some(CrewRole::Engineer)
                 && player.id.is_some()
                 && state.game_started)
             || (lobby.is_some() && player.id.is_some() && lobby_action_visible)
@@ -700,8 +1048,13 @@ fn update_panel_visibility(
 
 fn update_pilot_station(
     state: Res<GameState>,
-    mut telemetry: Query<(&PilotTelemetry, &mut Text)>,
+    mut telemetry: Query<
+        (&PilotTelemetry, &mut Text),
+        (Without<PilotStatus>, Without<EngineerTelemetry>),
+    >,
     mut gauges: Query<(&PilotGaugeFill, &mut Node)>,
+    mut status: Single<&mut Text, (With<PilotStatus>, Without<EngineerTelemetry>)>,
+    mut engineering: Single<&mut Text, (With<EngineerTelemetry>, Without<PilotStatus>)>,
 ) {
     if !state.is_changed() {
         return;
@@ -711,7 +1064,7 @@ fn update_pilot_station(
         text.0 = state
             .submarine
             .as_ref()
-            .map(|submarine| pilot_metric_text(telemetry.0, submarine))
+            .and_then(|submarine| pilot_metric_text(telemetry.0, submarine))
             .unwrap_or_else(|| "---".to_owned());
     }
 
@@ -720,10 +1073,37 @@ fn update_pilot_station(
             state
                 .submarine
                 .as_ref()
-                .map(|submarine| pilot_metric_percent(gauge.0, submarine))
+                .and_then(|submarine| pilot_metric_percent(gauge.0, submarine))
                 .unwrap_or(0.0),
         );
     }
+
+    status.0 = state
+        .submarine
+        .as_ref()
+        .and_then(|submarine| submarine.pilot.as_ref().map(|pilot| (submarine, pilot)))
+        .map(|(submarine, pilot)| {
+            format!(
+                "PLONGEE {:?} // VERT. {:+.1} m/s // VIRAGE {:+.1} deg/s // BALLAST {:?}{}",
+                submarine.common.dive_state,
+                pilot.vertical_speed,
+                pilot.turn_rate,
+                pilot.ballast,
+                if pilot.emergency_surface {
+                    " // URGENCE"
+                } else {
+                    ""
+                }
+            )
+        })
+        .unwrap_or_else(|| "PLONGEE --- // BALLAST ---".to_owned());
+
+    engineering.0 = state
+        .submarine
+        .as_ref()
+        .and_then(|submarine| submarine.engineering.as_ref())
+        .map(engineering_text)
+        .unwrap_or_else(|| "BATTERIE --- // OXYGENE --- // CHARGE ---".to_owned());
 }
 
 fn update_selector_error(
@@ -773,11 +1153,7 @@ fn role_button_system(
             Color::srgba(0.2, 0.75, 0.9, 0.2)
         });
         text.0 = if selected {
-            format!(
-                "> {}  //  {}  [SELECTIONNE]",
-                role_label(choice.0),
-                role_summary(choice.0)
-            )
+            format!("> {}  //  {}", role_label(choice.0), role_summary(choice.0))
         } else {
             format!("{}  //  {}", role_label(choice.0), role_summary(choice.0))
         };
@@ -930,7 +1306,8 @@ fn pilot_button_system(
             Interaction::Pressed => {
                 if state.game_started {
                     if let Some(submarine) = &state.submarine {
-                        commands.push(pilot_command(control, submarine));
+                        let command = pilot_command(control, submarine, &commands);
+                        commands.push(command);
                     }
                 }
                 BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
@@ -941,33 +1318,169 @@ fn pilot_button_system(
     }
 }
 
-fn pilot_command(control: &PilotControl, submarine: &SubmarineState) -> PlayerCommand {
+fn pilot_action_system(
+    mut buttons: Query<
+        (&Interaction, &PilotAction, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    state: Res<GameState>,
+    mut commands: ResMut<CommandQueue>,
+) {
+    for (interaction, action, mut background) in &mut buttons {
+        *background = match interaction {
+            Interaction::Pressed => {
+                if state.game_started {
+                    commands.push(match action {
+                        PilotAction::Ballast(ballast) => PlayerCommand::SetBallast(*ballast),
+                        PilotAction::EmergencySurface => PlayerCommand::EmergencySurface,
+                    });
+                }
+                BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
+            }
+            Interaction::Hovered => BackgroundColor(Color::srgb(0.06, 0.28, 0.36)),
+            Interaction::None => BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+        };
+    }
+}
+
+fn engineer_button_system(
+    mut buttons: Query<(&Interaction, &EngineerControl, &mut BackgroundColor), With<Button>>,
+    state: Res<GameState>,
+    mut commands: ResMut<CommandQueue>,
+) {
+    let engineering = state
+        .submarine
+        .as_ref()
+        .and_then(|submarine| submarine.engineering.as_ref());
+    for (interaction, control, mut background) in &mut buttons {
+        let active = engineering
+            .is_some_and(|engineering| engineer_control_active(*control, engineering, &commands));
+        *background = match interaction {
+            Interaction::Pressed => {
+                if state.game_started {
+                    if let Some(engineering) = engineering {
+                        let command = engineer_command(*control, engineering, &commands);
+                        commands.push(command);
+                    }
+                }
+                BackgroundColor(Color::srgb(0.35, 0.3, 0.08))
+            }
+            Interaction::Hovered => BackgroundColor(Color::srgb(0.28, 0.25, 0.08)),
+            Interaction::None if active => BackgroundColor(Color::srgb(0.32, 0.27, 0.06)),
+            Interaction::None => BackgroundColor(Color::srgb(0.12, 0.13, 0.08)),
+        };
+    }
+}
+
+fn engineer_control_active(
+    control: EngineerControl,
+    state: &EngineeringMeasurements,
+    commands: &CommandQueue,
+) -> bool {
+    match control {
+        EngineerControl::Diesels => commands.pending_diesels(state.propulsion.diesels_on),
+        EngineerControl::ElectricMotors => {
+            commands.pending_electric_motors(state.propulsion.electric_motors_on)
+        }
+        EngineerControl::Ventilation => {
+            commands.pending_ventilation(state.propulsion.ventilation_on)
+        }
+        EngineerControl::Charging => commands.pending_charging(state.propulsion.charging),
+    }
+}
+
+fn engineer_command(
+    control: EngineerControl,
+    state: &EngineeringMeasurements,
+    commands: &CommandQueue,
+) -> PlayerCommand {
+    match control {
+        EngineerControl::Diesels => {
+            PlayerCommand::SetDiesels(!commands.pending_diesels(state.propulsion.diesels_on))
+        }
+        EngineerControl::ElectricMotors => PlayerCommand::SetElectricMotors(
+            !commands.pending_electric_motors(state.propulsion.electric_motors_on),
+        ),
+        EngineerControl::Ventilation => PlayerCommand::SetVentilation(
+            !commands.pending_ventilation(state.propulsion.ventilation_on),
+        ),
+        EngineerControl::Charging => {
+            PlayerCommand::SetBatteryCharging(!commands.pending_charging(state.propulsion.charging))
+        }
+    }
+}
+
+fn pilot_command(
+    control: &PilotControl,
+    submarine: &SubmarineSnapshot,
+    commands: &CommandQueue,
+) -> PlayerCommand {
+    let pilot = submarine.pilot.as_ref().expect("pilot projection");
     match control.metric {
         PilotMetric::Heading => PlayerCommand::SetHeading(
-            (submarine.heading + control.direction * 5.0).rem_euclid(360.0),
+            (commands.pending_heading(pilot.ordered_heading) + control.direction * 5.0)
+                .rem_euclid(360.0),
         ),
-        PilotMetric::Speed => {
-            PlayerCommand::SetSpeed((submarine.speed + control.direction).clamp(0.0, 20.0))
-        }
+        PilotMetric::Speed => PlayerCommand::SetSpeed(
+            (commands.pending_speed(pilot.ordered_speed) + control.direction).clamp(0.0, 18.0),
+        ),
         PilotMetric::Depth => PlayerCommand::SetDepth(
-            (submarine.depth + control.direction * 10.0).clamp(0.0, 1_000.0),
+            (commands.pending_depth(pilot.ordered_depth) + control.direction * 10.0)
+                .clamp(0.0, pilot.max_depth),
         ),
     }
 }
 
-fn pilot_metric_text(metric: PilotMetric, submarine: &SubmarineState) -> String {
-    match metric {
-        PilotMetric::Heading => format!("{:>5.1} deg", submarine.heading),
-        PilotMetric::Speed => format!("{:>5.1} kn", submarine.speed),
-        PilotMetric::Depth => format!("{:>5.0} m", submarine.depth),
-    }
+fn pilot_metric_text(metric: PilotMetric, submarine: &SubmarineSnapshot) -> Option<String> {
+    let pilot = submarine.pilot.as_ref()?;
+    Some(match metric {
+        PilotMetric::Heading => format!(
+            "{:>3.0}/{:>3.0} deg",
+            submarine.common.heading, pilot.ordered_heading
+        ),
+        PilotMetric::Speed => format!(
+            "{:>3.1}/{:>3.1} kn",
+            submarine.common.speed, pilot.ordered_speed
+        ),
+        PilotMetric::Depth => format!(
+            "{:>3.0}/{:>3.0} m",
+            submarine.common.depth, pilot.ordered_depth
+        ),
+    })
 }
 
-fn pilot_metric_percent(metric: PilotMetric, submarine: &SubmarineState) -> f32 {
-    match metric {
-        PilotMetric::Heading => submarine.heading.rem_euclid(360.0) / 360.0 * 100.0,
-        PilotMetric::Speed => submarine.speed.clamp(0.0, 20.0) / 20.0 * 100.0,
-        PilotMetric::Depth => submarine.depth.clamp(0.0, 1_000.0) / 1_000.0 * 100.0,
+fn pilot_metric_percent(metric: PilotMetric, submarine: &SubmarineSnapshot) -> Option<f32> {
+    let pilot = submarine.pilot.as_ref()?;
+    Some(match metric {
+        PilotMetric::Heading => submarine.common.heading.rem_euclid(360.0) / 360.0 * 100.0,
+        PilotMetric::Speed => {
+            submarine.common.speed.clamp(0.0, pilot.max_speed) / pilot.max_speed * 100.0
+        }
+        PilotMetric::Depth => {
+            submarine.common.depth.clamp(0.0, pilot.max_depth) / pilot.max_depth * 100.0
+        }
+    })
+}
+
+fn engineering_text(engineering: &EngineeringMeasurements) -> String {
+    format!(
+        "BATTERIE {:>5.1}% // OXYGENE {:>5.1}% // CHARGE {:>5.2}%/s\nPRISE D'AIR {} // DIESELS {} // ELEC. {} // VENT. {} // RECHARGE {}",
+        engineering.battery,
+        engineering.oxygen,
+        engineering.electrical_load,
+        on_off(engineering.air_intake_available),
+        on_off(engineering.propulsion.diesels_on),
+        on_off(engineering.propulsion.electric_motors_on),
+        on_off(engineering.propulsion.ventilation_on),
+        on_off(engineering.propulsion.charging),
+    )
+}
+
+fn on_off(active: bool) -> &'static str {
+    if active {
+        "ON"
+    } else {
+        "OFF"
     }
 }
 
@@ -986,6 +1499,9 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
     };
 
     let lobby = state.lobby.as_ref().map_or_else(String::new, |lobby| {
+        if state.game_started {
+            return format!("\nSALLE {} // TICK {}", lobby.room_id.0, state.server_tick);
+        }
         let slots = lobby
             .slots
             .iter()
@@ -1010,8 +1526,32 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
         |submarine| {
             format!(
                 "CAP       {:>6.1} deg\nVITESSE   {:>6.1} kn\nPROFONDEUR {:>6.1} m",
-                submarine.heading, submarine.speed, submarine.depth
+                submarine.common.heading, submarine.common.speed, submarine.common.depth
             )
+        },
+    );
+
+    let alerts = state.submarine.as_ref().map_or_else(
+        || "\nBRUIT     ---\nALERTES   ---".to_owned(),
+        |submarine| {
+            if submarine.common.alerts.is_empty() {
+                format!(
+                    "\nBRUIT     {:?}\nALERTES   AUCUNE",
+                    submarine.common.acoustic_level
+                )
+            } else {
+                format!(
+                    "\nBRUIT     {:?}\nALERTES   {}",
+                    submarine.common.acoustic_level,
+                    submarine
+                        .common
+                        .alerts
+                        .iter()
+                        .map(alert_label)
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                )
+            }
         },
     );
 
@@ -1021,24 +1561,35 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
         .map(|error| format!("\n\nERREUR SERVEUR\n{}", error_label(error)))
         .unwrap_or_default();
 
-    if role == CrewRole::Pilot {
+    if matches!(role, CrewRole::Pilot | CrewRole::Engineer) {
         format!(
-            "SUBMARINE // {}\n{}{}{}",
+            "SUBMARINE // {}\n{}{}{}{}",
             role_label(role),
             status,
             lobby,
+            alerts,
             error
         )
     } else {
         format!(
-            "SUBMARINE // {}\n{}{}\n\n{}\n\nCOMMANDES\n{}{}",
+            "SUBMARINE // {}\n{}{}{}\n\n{}\n\nCOMMANDES\n{}{}",
             role_label(role),
             status,
             lobby,
+            alerts,
             telemetry,
             controls_for_role(role),
             error
         )
+    }
+}
+
+fn alert_label(alert: &AlertKind) -> &'static str {
+    match alert {
+        AlertKind::BatteryLow => "BATTERIE BASSE",
+        AlertKind::AirCritical => "AIR CRITIQUE",
+        AlertKind::Cavitation => "CAVITATION",
+        AlertKind::CriticalDepth => "PROFONDEUR CRITIQUE",
     }
 }
 
@@ -1106,12 +1657,7 @@ mod tests {
         player.id = Some(shared::PlayerId(2));
         player.joined = true;
         let state = GameState {
-            submarine: Some(shared::SubmarineState {
-                heading: 90.0,
-                speed: 12.0,
-                depth: 150.0,
-                ..default()
-            }),
+            submarine: Some(pilot_snapshot(90.0, 12.0, 150.0)),
             game_started: true,
             last_error: Some(shared::ProtocolError::CommandNotAllowedForRole),
             ..default()
@@ -1121,18 +1667,34 @@ mod tests {
 
         assert!(hud.contains("PILOTE"));
         assert!(hud.contains("PARTIE EN COURS"));
+        assert!(hud.contains("BRUIT     Low"));
         assert!(!hud.contains("90.0 deg"));
         assert!(hud.contains("COMMANDE INTERDITE POUR CE POSTE"));
     }
 
     #[test]
-    fn pilot_station_commands_wrap_and_clamp_values() {
-        let submarine = SubmarineState {
-            heading: 358.0,
-            speed: 20.0,
-            depth: 0.0,
+    fn engineer_hud_leaves_detailed_controls_to_station_panel() {
+        let mut player = LocalPlayer::default();
+        player.role = Some(CrewRole::Engineer);
+        player.id = Some(shared::PlayerId(3));
+        player.joined = true;
+        let state = GameState {
+            submarine: Some(pilot_snapshot(0.0, 0.0, 0.0)),
+            game_started: true,
             ..default()
         };
+
+        let hud = hud_content(&player, &state);
+
+        assert!(hud.contains("INGENIEUR"));
+        assert!(hud.contains("BRUIT"));
+        assert!(!hud.contains("COMMANDES"));
+    }
+
+    #[test]
+    fn pilot_station_commands_wrap_and_clamp_values() {
+        let submarine = pilot_snapshot(358.0, 18.0, 0.0);
+        let commands = CommandQueue::default();
 
         assert!(matches!(
             pilot_command(
@@ -1141,6 +1703,7 @@ mod tests {
                     direction: 1.0,
                 },
                 &submarine,
+                &commands,
             ),
             PlayerCommand::SetHeading(3.0)
         ));
@@ -1151,8 +1714,9 @@ mod tests {
                     direction: 1.0,
                 },
                 &submarine,
+                &commands,
             ),
-            PlayerCommand::SetSpeed(20.0)
+            PlayerCommand::SetSpeed(18.0)
         ));
         assert!(matches!(
             pilot_command(
@@ -1161,9 +1725,36 @@ mod tests {
                     direction: -1.0,
                 },
                 &submarine,
+                &commands,
             ),
             PlayerCommand::SetDepth(0.0)
         ));
+    }
+
+    #[test]
+    fn rapid_pilot_commands_accumulate_between_snapshots() {
+        let submarine = pilot_snapshot(0.0, 10.0, 0.0);
+        let control = PilotControl {
+            metric: PilotMetric::Speed,
+            direction: 1.0,
+        };
+        let mut commands = CommandQueue::default();
+        let first = pilot_command(&control, &submarine, &commands);
+        commands.push(first);
+
+        assert_eq!(
+            pilot_command(&control, &submarine, &commands),
+            PlayerCommand::SetSpeed(12.0)
+        );
+    }
+
+    #[test]
+    fn non_pilot_projection_is_safe_for_hidden_pilot_widgets() {
+        let mut snapshot = pilot_snapshot(0.0, 0.0, 0.0);
+        snapshot.pilot = None;
+
+        assert_eq!(pilot_metric_text(PilotMetric::Heading, &snapshot), None);
+        assert_eq!(pilot_metric_percent(PilotMetric::Heading, &snapshot), None);
     }
 
     #[test]
@@ -1172,6 +1763,28 @@ mod tests {
         assert!(!valid_room_code("11"));
         assert!(!valid_room_code("00000A"));
         assert!(!valid_room_code("0000001"));
+    }
+
+    #[test]
+    fn selector_uses_expected_layout_at_target_dimensions() {
+        assert_eq!(selector_layout(740.0, 360.0), SelectorLayout::Landscape);
+        assert_eq!(selector_layout(640.0, 360.0), SelectorLayout::Landscape);
+        assert_eq!(selector_layout(360.0, 740.0), SelectorLayout::Portrait);
+        assert_eq!(selector_layout(360.0, 640.0), SelectorLayout::Portrait);
+    }
+
+    #[test]
+    fn compact_landscape_breakpoint_requires_both_dimensions() {
+        assert!(compact_landscape(600.0, 500.0));
+        assert!(!compact_landscape(599.0, 500.0));
+        assert!(!compact_landscape(600.0, 501.0));
+    }
+
+    #[test]
+    fn viewport_resize_ignores_subpixel_noise() {
+        assert!(!viewport_size_changed(360.0, 640.0, 360.4, 639.6));
+        assert!(viewport_size_changed(360.0, 640.0, 361.0, 640.0));
+        assert!(viewport_size_changed(360.0, 640.0, 360.0, 641.0));
     }
 
     #[test]
@@ -1204,5 +1817,32 @@ mod tests {
         assert_eq!(selector_visibility(&player), Visibility::Hidden);
         assert_eq!(pilot_visibility(&player, false), Visibility::Hidden);
         assert_eq!(pilot_visibility(&player, true), Visibility::Visible);
+    }
+
+    fn pilot_snapshot(heading: f32, speed: f32, depth: f32) -> SubmarineSnapshot {
+        SubmarineSnapshot {
+            common: shared::CommonMeasurements {
+                x: 0.0,
+                y: 0.0,
+                heading,
+                speed,
+                depth,
+                dive_state: shared::DiveState::Surface,
+                acoustic_level: shared::AcousticLevel::Low,
+                alerts: vec![],
+            },
+            pilot: Some(shared::PilotMeasurements {
+                ordered_heading: heading,
+                ordered_speed: speed,
+                ordered_depth: depth,
+                turn_rate: 0.0,
+                vertical_speed: 0.0,
+                ballast: BallastState::Hold,
+                emergency_surface: false,
+                max_speed: 18.0,
+                max_depth: 250.0,
+            }),
+            engineering: None,
+        }
     }
 }

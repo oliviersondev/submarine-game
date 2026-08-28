@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::state::{CrewRole, SubmarineState, SystemId};
+use crate::state::{BallastState, CrewRole, SubmarineConfig, SubmarineSnapshot, SystemId};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -16,9 +16,19 @@ pub struct PlayerId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CommandId(pub u64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MissionConfig {
     pub seed: u64,
+    pub submarine: SubmarineConfig,
+}
+
+impl MissionConfig {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            seed,
+            submarine: SubmarineConfig::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -33,6 +43,12 @@ pub enum PlayerCommand {
     SetHeading(f32),
     SetDepth(f32),
     SetSpeed(f32),
+    SetBallast(BallastState),
+    EmergencySurface,
+    SetDiesels(bool),
+    SetElectricMotors(bool),
+    SetVentilation(bool),
+    SetBatteryCharging(bool),
     FireTorpedo { bearing: f32 },
     RepairSystem(SystemId),
     SonarPing,
@@ -40,6 +56,9 @@ pub enum PlayerCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GameEvent {
+    AlertRaised(crate::AlertKind),
+    AlertCleared(crate::AlertKind),
+    EmergencySurfaceStarted,
     SonarContact { bearing: f32, distance: f32 },
     SystemDamaged(SystemId),
     SystemRepaired(SystemId),
@@ -112,7 +131,7 @@ pub enum ServerPayload {
     Snapshot {
         snapshot_id: u64,
         tick: u64,
-        submarine: SubmarineState,
+        submarine: SubmarineSnapshot,
     },
     Event {
         tick: u64,
@@ -190,6 +209,10 @@ mod tests {
                     depth: 40.0,
                 },
             })),
+            ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
+                command_id: CommandId(43),
+                command: PlayerCommand::SetBallast(BallastState::Flood),
+            })),
         ];
 
         for message in messages {
@@ -198,16 +221,66 @@ mod tests {
     }
 
     #[test]
-    fn version_one_fixtures_detect_enum_reordering() {
+    fn version_two_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![1, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![1, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[1, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[1, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![2, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![2, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[2, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[2, 0, 2, 1]).unwrap(), ready);
+    }
+
+    #[test]
+    fn version_two_m2_command_fixture_is_stable() {
+        let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
+            command_id: CommandId(9),
+            command: PlayerCommand::SetBallast(BallastState::Flood),
+        }));
+        let fixture = vec![2, 1, 0, 9, 3, 0];
+        assert_eq!(encode(&message), fixture);
+        assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
+    }
+
+    #[test]
+    fn version_two_role_snapshot_fixture_is_stable() {
+        let message = ServerMessage::new(ServerPayload::Snapshot {
+            snapshot_id: 3,
+            tick: 7,
+            submarine: SubmarineSnapshot {
+                common: crate::CommonMeasurements {
+                    x: 1.0,
+                    y: 2.0,
+                    heading: 90.0,
+                    speed: 3.0,
+                    depth: 12.0,
+                    dive_state: crate::DiveState::Periscope,
+                    acoustic_level: crate::AcousticLevel::Low,
+                    alerts: vec![crate::AlertKind::BatteryLow],
+                },
+                pilot: Some(crate::PilotMeasurements {
+                    ordered_heading: 90.0,
+                    ordered_speed: 4.0,
+                    ordered_depth: 20.0,
+                    turn_rate: 1.0,
+                    vertical_speed: 0.5,
+                    ballast: BallastState::Flood,
+                    emergency_surface: false,
+                    max_speed: 8.0,
+                    max_depth: 250.0,
+                }),
+                engineering: None,
+            },
+        });
+        let fixture = vec![
+            2, 3, 3, 7, 0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 180, 66, 0, 0, 64, 64, 0, 0, 64, 65, 1,
+            1, 1, 0, 1, 0, 0, 180, 66, 0, 0, 128, 64, 0, 0, 160, 65, 0, 0, 128, 63, 0, 0, 0, 63, 0,
+            0, 0, 0, 0, 65, 0, 0, 122, 67, 0,
+        ];
+        assert_eq!(encode(&message), fixture);
+        assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), message);
     }
 }

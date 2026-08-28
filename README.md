@@ -26,7 +26,7 @@ Un à cinq joueurs créent ou rejoignent une salle éphémère par son code cour
 
 Chaque joueur peut se déclarer prêt. Un joueur démarre explicitement la mission ; les rôles libres sont alors affichés et conservés comme bots. Plusieurs salles indépendantes peuvent fonctionner dans le même processus. Il n'y a ni persistance ni reconnexion à ce stade.
 
-### Contrôles temporaires
+### Contrôles
 
 Les commandes clavier permettent de tester le flux réseau avant l'ajout des interfaces de station :
 
@@ -34,11 +34,11 @@ Les commandes clavier permettent de tester le flux réseau avant l'ajout des int
 |------|---------|
 | `Pilot` | `←`/`→` cap, `↑`/`↓` vitesse, `PageUp`/`PageDown` profondeur |
 | `Sonar` | `Espace` ping sonar |
-| `Engineer` | `1` à `5` réparation d'un système |
+| `Engineer` | `1` diesels, `2` moteurs électriques, `3` ventilation, `4` recharge, `5` réparation moteur |
 | `Weapons` | `Espace` tir dans le cap actuel |
 | `Captain` | Bouton tactile envoyant un ordre structuré au bot Pilote |
 
-Le HUD affiche le code de salle, les humains/bots, les états prêts, le tick serveur, les dernières valeurs autoritaires et la dernière erreur. Le poste Pilote dispose de jauges et de boutons souris/tactiles. Le Capitaine peut transmettre au bot Pilote une consigne de cap, vitesse et profondeur ; cet ordre est explicitement refusé si le Pilote est humain.
+Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes actives et la dernière erreur. Le poste Pilote distingue consignes et mesures réelles et contrôle les ballasts ainsi que la remontée d'urgence. Le poste Ingénierie contrôle propulsion, ventilation et recharge tout en suivant batterie, oxygène et charge. Le Capitaine peut transmettre au bot Pilote une consigne de cap, vitesse et profondeur ; cet ordre est explicitement refusé si le Pilote est humain.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ submarine-game/
     │   └── src/
     │       ├── main.rs     # écoute 0.0.0.0:3000, route /ws
     │       ├── lobby.rs    # registre de salles, rôles, prêts, démarrage, ws_handler
-    │       └── game_room.rs# boucle de jeu 20 Hz, broadcast StateSnapshot
+    │       └── game_room.rs# boucle de jeu 20 Hz et projections par rôle
     └── client/             # Bevy 0.19 + WebGL2 — compile en WASM
         ├── src/
         │   ├── main.rs     # App Bevy avec DefaultPlugins + plugins custom
@@ -123,7 +123,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `1`). `RoomId`, `SessionId`, `PlayerId` et `CommandId` sont des types opaques. Les commandes sont séparées entre lobby et mission.
+Chaque enveloppe porte `version: u16` (actuellement `2`). `RoomId`, `SessionId`, `PlayerId` et `CommandId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 2 remplace directement la version 1 et transmet une projection du sous-marin adaptée au rôle plutôt que l'état autoritaire complet.
 
 ### Client → Serveur (`ClientPayload`)
 
@@ -145,21 +145,11 @@ Error { command_id, error }
 
 ### Tick rate
 
-20 ticks/s côté serveur et par salle. Chaque mission reçoit une graine déterministe, et chaque snapshot contient ses numéros de snapshot et de tick. Le tick fait avancer le sous-marin avec un cap nautique (`0°` nord, `90°` est) et convertit sa vitesse des nœuds vers les mètres par seconde. Le client ignore les anciens snapshots et interpole la position et le cap entre les deux derniers reçus.
+20 ticks/s côté serveur et par salle. Chaque mission reçoit une graine et une configuration déterministes, et chaque snapshot contient ses numéros de snapshot et de tick. Le tick fait converger les mesures réelles vers les consignes selon des taux bornés, avance le sous-marin avec un cap nautique (`0°` nord, `90°` est), puis met à jour ressources, bruit et alertes. Le client ignore les anciens snapshots et interpole la position et le cap entre les deux derniers reçus.
 
-## État du sous-marin (`SubmarineState`)
+## État du sous-marin
 
-```rust
-pub struct SubmarineState {
-    pub x: f32,              // position horizontale (carte)
-    pub y: f32,              // position horizontale (carte)
-    pub depth: f32,          // profondeur en mètres (0 = surface)
-    pub heading: f32,        // cap 0–360°
-    pub speed: f32,          // nœuds
-    pub hull_integrity: f32, // 0–100
-    pub systems: Vec<(SystemId, SystemStatus)>,
-}
-```
+`SubmarineState` est l'état autoritaire utilisé par `simulation` : position horizontale, profondeur séparée, consignes et mesures réelles, ballasts, propulsion, ressources, bruit, coque et systèmes. Le réseau transmet un `SubmarineSnapshot` contenant les mesures communes et uniquement les détails du poste concerné (`PilotMeasurements` ou `EngineeringMeasurements`).
 
 ## Systèmes du sous-marin
 
@@ -183,10 +173,11 @@ make build-wasm
 ## Roadmap
 
 - [x] Déplacement de base du sous-marin (`simulation::tick`)
-- [ ] Interfaces de station complètes (jauges et commandes)
-- [x] Interpolation client entre les StateSnapshot
+- [ ] Interfaces des cinq stations complètes (Pilote et Ingénierie M2 livrées)
+- [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v1 avec fixtures `postcard`, identifiants et ticks numérotés
+- [x] Protocole v2 avec fixtures `postcard`, projections par rôle et ticks numérotés
+- [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
 - [ ] Reconnexion avec snapshot d'état complet
 - [ ] Dockerfile + déploiement ECS Fargate
