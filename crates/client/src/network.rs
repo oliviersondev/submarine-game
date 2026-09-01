@@ -4,7 +4,8 @@ use shared::{
     codec::{decode, encode},
     ClientMessage, ClientPayload, CommandId, CrewRole, GameEvent, LobbyCommand, LobbySnapshot,
     MissionCommand, PilotOrder, PlayerCommand, PlayerId, ProtocolError, RoomId, ServerMessage,
-    ServerPayload, SessionId, SubmarineSnapshot, SystemId, PROTOCOL_VERSION,
+    ServerPayload, SessionId, SonarMeasurements, SubmarineSnapshot, SystemId, TacticalMeasurements,
+    PROTOCOL_VERSION,
 };
 
 use crate::role::role_from_environment;
@@ -162,6 +163,8 @@ pub struct GameState {
     pub lobby: Option<LobbySnapshot>,
     pub previous_submarine: Option<SubmarineSnapshot>,
     pub submarine: Option<SubmarineSnapshot>,
+    pub sonar: Option<SonarMeasurements>,
+    pub tactical: Option<TacticalMeasurements>,
     pub snapshot_id: u64,
     pub server_tick: u64,
     pub game_started: bool,
@@ -427,11 +430,13 @@ fn handle_server_message(
         ServerPayload::Snapshot {
             snapshot_id,
             tick,
-            submarine,
+            mission,
         } => {
             if snapshot_id > state.snapshot_id {
-                commands.reconcile(&submarine);
-                state.previous_submarine = state.submarine.replace(submarine);
+                commands.reconcile(&mission.submarine);
+                state.previous_submarine = state.submarine.replace(mission.submarine);
+                state.sonar = mission.sonar;
+                state.tactical = mission.tactical;
                 state.snapshot_id = snapshot_id;
                 state.server_tick = tick;
             }
@@ -486,11 +491,13 @@ pub fn controls_for_role(role: CrewRole) -> &'static str {
     match role {
         CrewRole::Captain => "ordre tactile vers le bot Pilote",
         CrewRole::Pilot => "Gauche/Droite : cap\nHaut/Bas : vitesse\nPgUp/PgDown : profondeur",
-        CrewRole::Sonar => "Espace : ping sonar",
+        CrewRole::Sonar => {
+            "Espace/PING : sonar actif\nPistes : selection, partage, fusion, abandon"
+        }
         CrewRole::Engineer => {
             "1 diesels | 2 electrique | 3 ventilation | 4 recharge | 5 reparation"
         }
-        CrewRole::Weapons => "Espace : tir dans le cap actuel",
+        CrewRole::Weapons => "Pistes partagees en lecture seule\nEspace : tir dans le cap actuel",
     }
 }
 

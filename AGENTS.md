@@ -37,6 +37,6 @@
 - Rooms are held in one in-memory registry, start explicitly with one to five humans, and fill free roles with bots. There is still no persistence or reconnection flow.
 - Role-based command validation belongs in `game_room.rs`; rejected commands must not reach `Simulation` and the error must only be sent to the originating role.
 - `Simulation::tick` applies basic nautical movement but produces no physics events. There are no collisions, inertia, or buoyancy yet.
-- Sonar ping has no effect, repair emits an event without mutating system state, and firing emits an event without creating a torpedo.
+- Sonar M3 is implemented with a private deterministic convoi, passive/active observations, uncertain tracks, role-filtered projections, and a tactile station. Repair still emits an event without mutating system state, and firing emits an event without creating a torpedo.
 - The README calls the client a PWA, but there is no manifest or service worker yet. The hard-coded localhost WebSocket also prevents normal use from a remote phone.
 - There is no CI, formatter/linter config, Dockerfile, or deployment config; do not infer those workflows from the roadmap.

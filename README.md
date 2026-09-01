@@ -20,7 +20,7 @@ Un à cinq joueurs créent ou rejoignent une salle éphémère par son code cour
 |------|----------------|
 | `Captain` | Coordination générale, décisions tactiques |
 | `Pilot` | Cap, vitesse, profondeur |
-| `Sonar` | Détection des contacts (contacts bruts non classifiés) |
+| `Sonar` | Détection, classification et partage des pistes |
 | `Engineer` | Réparation des systèmes, gestion de l'énergie |
 | `Weapons` | Tir des torpilles |
 
@@ -38,7 +38,7 @@ Les commandes clavier permettent de tester le flux réseau avant l'ajout des int
 | `Weapons` | `Espace` tir dans le cap actuel |
 | `Captain` | Bouton tactile envoyant un ordre structuré au bot Pilote |
 
-Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes actives et la dernière erreur. Le poste Pilote distingue consignes et mesures réelles et contrôle les ballasts ainsi que la remontée d'urgence. Le poste Ingénierie contrôle propulsion, ventilation et recharge tout en suivant batterie, oxygène et charge. Le Capitaine peut transmettre au bot Pilote une consigne de cap, vitesse et profondeur ; cet ordre est explicitement refusé si le Pilote est humain.
+Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes actives et la dernière erreur. Le poste Pilote distingue consignes et mesures réelles et contrôle les ballasts ainsi que la remontée d'urgence. Le poste Ingénierie contrôle propulsion, ventilation et recharge. Le Sonar suit des observations imparfaites, gère ses pistes et les partage avec le Capitaine et l'Armement. Leur carte tactique ne montre que ces estimations partagées. Le Capitaine peut aussi transmettre au bot Pilote une consigne de cap, vitesse et profondeur.
 
 ## Architecture
 
@@ -57,7 +57,7 @@ submarine-game/
     │       ├── protocol.rs # enveloppes versionnées, lobby, mission, identifiants et erreurs
     │       └── codec.rs    # encode() / decode() postcard
     ├── simulation/         # logique déterministe — NO async, NO Bevy
-    │   └── src/lib.rs      # Simulation::new(), tick(dt), apply_command()
+    │   └── src/            # navigation, monde privé, détection et pistes
     ├── server/             # Axum 0.8 + Tokio — binaire natif
     │   └── src/
     │       ├── main.rs     # écoute 0.0.0.0:3000, route /ws
@@ -123,7 +123,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `2`). `RoomId`, `SessionId`, `PlayerId` et `CommandId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 2 remplace directement la version 1 et transmet une projection du sous-marin adaptée au rôle plutôt que l'état autoritaire complet.
+Chaque enveloppe porte `version: u16` (actuellement `3`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 3 remplace directement la version 2 et transmet une projection de mission adaptée au rôle plutôt que l'état autoritaire complet.
 
 ### Client → Serveur (`ClientPayload`)
 
@@ -138,18 +138,18 @@ Mission(Player { command_id, command } | OrderPilotBot { command_id, order })
 SessionJoined { session_id, player_id, room_id, role }
 Lobby(LobbySnapshot)                          // humains, bots et prêts
 MissionStarted { config }
-Snapshot { snapshot_id, tick, submarine }
+Snapshot { snapshot_id, tick, mission }
 Event { tick, event }
 Error { command_id, error }
 ```
 
 ### Tick rate
 
-20 ticks/s côté serveur et par salle. Chaque mission reçoit une graine et une configuration déterministes, et chaque snapshot contient ses numéros de snapshot et de tick. Le tick fait converger les mesures réelles vers les consignes selon des taux bornés, avance le sous-marin avec un cap nautique (`0°` nord, `90°` est), puis met à jour ressources, bruit et alertes. Le client ignore les anciens snapshots et interpole la position et le cap entre les deux derniers reçus.
+20 ticks/s côté serveur et par salle. Chaque mission reçoit une graine et une configuration déterministes, et chaque snapshot contient ses numéros de snapshot et de tick. Le tick avance le sous-marin et le convoi, puis met à jour ressources, bruit, observations et pistes. Le client ignore les anciens snapshots et interpole la position et le cap entre les deux derniers reçus.
 
 ## État du sous-marin
 
-`SubmarineState` est l'état autoritaire utilisé par `simulation` : position horizontale, profondeur séparée, consignes et mesures réelles, ballasts, propulsion, ressources, bruit, coque et systèmes. Le réseau transmet un `SubmarineSnapshot` contenant les mesures communes et uniquement les détails du poste concerné (`PilotMeasurements` ou `EngineeringMeasurements`).
+`SubmarineState` est l'état autoritaire du bâtiment joueur. Le monde ennemi reste privé dans `simulation`. Le réseau transmet un `MissionSnapshot` contenant la projection du sous-marin et, selon le rôle, les observations Sonar ou les seules pistes explicitement partagées. Aucune position ennemie réelle ne traverse le protocole.
 
 ## Systèmes du sous-marin
 
@@ -173,11 +173,12 @@ make build-wasm
 ## Roadmap
 
 - [x] Déplacement de base du sous-marin (`simulation::tick`)
-- [ ] Interfaces des cinq stations complètes (Pilote et Ingénierie M2 livrées)
+- [ ] Interfaces des cinq stations complètes (Pilote, Ingénierie, Sonar et carte Capitaine livrés)
 - [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v2 avec fixtures `postcard`, projections par rôle et ticks numérotés
+- [x] Protocole v3 avec fixtures `postcard`, projections par rôle et ticks numérotés
 - [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
+- [x] Convoi, observations, pistes incertaines et poste Sonar tactile (M3)
 - [ ] Reconnexion avec snapshot d'état complet
 - [ ] Dockerfile + déploiement ECS Fargate

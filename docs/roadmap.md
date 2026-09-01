@@ -1,8 +1,8 @@
 # Roadmap de conception et de développement
 
 **Version :** 0.1  
-**Date :** 28 août 2026  
-**Statut :** proposée
+**Date :** 1 septembre 2026  
+**Statut :** active
 
 Cette roadmap transforme le prototype réseau actuel en une mission de sous-marin jouable. Elle privilégie les vertical slices : chaque jalon doit relier règles, protocole, serveur et interface plutôt que terminer un système isolé invisible pour le joueur.
 
@@ -16,7 +16,7 @@ Cette roadmap transforme le prototype réseau actuel en une mission de sous-mari
 - Ne pas engager le déploiement cloud avant que la mission de référence soit jouable localement.
 - Revoir le GDD à la fin de chaque jalon à partir des tests de jeu.
 
-## 2. État de départ
+## 2. État actuel
 
 Le dépôt fournit déjà :
 
@@ -26,10 +26,11 @@ Le dépôt fournit déjà :
 - un lobby global avec cinq rôles uniques ;
 - une simulation autoritaire à 20 Hz ;
 - validation des commandes par rôle ;
-- déplacement nautique simple et interpolation du rendu ;
-- sélection du rôle et première interface tactile du pilote.
+- navigation inertielle, plongée, endurance, bruit et interpolation du rendu ;
+- convoi déterministe, écoute passive et active, pistes incertaines et classification progressive ;
+- interfaces tactiles Pilote, Ingénierie, Sonar et carte tactique du Capitaine.
 
-Les commandes sonar, armement et réparation sont encore symboliques. Le lobby exige cinq joueurs, ne gère pas la reprise et l'URL WebSocket locale empêche une utilisation normale depuis un téléphone distant.
+L'armement, les réparations et la réaction tactique de l'escorte sont encore symboliques. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
 
 ## 3. Vue d'ensemble
 
@@ -186,6 +187,10 @@ M2 est livré avec un protocole v2 sans compatibilité v1 : configuration centra
 ### Critère de validation
 
 L'équipage localise, suit et classe un convoi en combinant écoute passive, manœuvre et éventuellement ping actif.
+
+### État implémenté au 1 septembre 2026
+
+M3 est livré sous forme minimale avec un protocole v3 sans compatibilité v2. La simulation crée deux cargos et une escorte sur une route déterministe, produit des observations passives bruitées sans distance exacte, puis construit des pistes dont la distance, le cap, la vitesse, la confiance et la classification se précisent progressivement. Les pistes dérivent et expirent en l'absence d'observation. Le Sonar peut pinguer, sélectionner, fusionner, abandonner et partager ses pistes ; le Capitaine et l'Armement ne reçoivent que les pistes partagées. Un bot Sonar partage automatiquement les pistes fiables. Le ping actif améliore les mesures et crée une piste privée imparfaite du sous-marin pour l'escorte, mais celle-ci ne change pas encore de comportement avant M5.
 
 ## 8. M4 - Solution de tir et torpilles
 

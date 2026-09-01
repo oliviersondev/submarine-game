@@ -251,3 +251,77 @@ pub struct SubmarineSnapshot {
     pub pilot: Option<PilotMeasurements>,
     pub engineering: Option<EngineeringMeasurements>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ObservationId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TrackId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ObservationMode {
+    Passive,
+    Active,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AcousticProfile {
+    LowFrequency,
+    HighFrequency,
+    Mixed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ContactClassification {
+    Unknown,
+    Merchant,
+    Escort,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SonarObservation {
+    pub id: ObservationId,
+    pub tick: u64,
+    pub mode: ObservationMode,
+    pub bearing: f32,
+    pub bearing_uncertainty: f32,
+    pub distance: Option<f32>,
+    pub distance_uncertainty: Option<f32>,
+    pub signal_strength: f32,
+    pub profile: AcousticProfile,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackEstimate {
+    pub id: TrackId,
+    pub bearing: f32,
+    pub bearing_uncertainty: f32,
+    pub distance: Option<f32>,
+    pub distance_uncertainty: Option<f32>,
+    pub heading: Option<f32>,
+    pub speed: Option<f32>,
+    pub classification: ContactClassification,
+    pub confidence: f32,
+    pub last_observation_tick: u64,
+    pub shared: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SonarMeasurements {
+    pub observations: Vec<SonarObservation>,
+    pub tracks: Vec<TrackEstimate>,
+    pub own_noise: f32,
+    pub ping_cooldown_remaining: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TacticalMeasurements {
+    pub shared_tracks: Vec<TrackEstimate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MissionSnapshot {
+    pub submarine: SubmarineSnapshot,
+    pub sonar: Option<SonarMeasurements>,
+    pub tactical: Option<TacticalMeasurements>,
+}

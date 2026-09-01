@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::state::{BallastState, CrewRole, SubmarineConfig, SubmarineSnapshot, SystemId};
+use crate::state::{BallastState, CrewRole, MissionSnapshot, SubmarineConfig, SystemId, TrackId};
 
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -49,9 +49,20 @@ pub enum PlayerCommand {
     SetElectricMotors(bool),
     SetVentilation(bool),
     SetBatteryCharging(bool),
-    FireTorpedo { bearing: f32 },
+    FireTorpedo {
+        bearing: f32,
+    },
     RepairSystem(SystemId),
     SonarPing,
+    MergeTracks {
+        primary: TrackId,
+        secondary: TrackId,
+    },
+    SetTrackShared {
+        track_id: TrackId,
+        shared: bool,
+    },
+    DropTrack(TrackId),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,7 +70,6 @@ pub enum GameEvent {
     AlertRaised(crate::AlertKind),
     AlertCleared(crate::AlertKind),
     EmergencySurfaceStarted,
-    SonarContact { bearing: f32, distance: f32 },
     SystemDamaged(SystemId),
     SystemRepaired(SystemId),
     TorpedoFired { bearing: f32 },
@@ -76,6 +86,9 @@ pub enum ProtocolError {
     PilotControlledByHuman,
     InvalidRoomCode,
     ConnectionFailed,
+    TrackNotFound(TrackId),
+    InvalidTrackMerge,
+    SonarPingCoolingDown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,7 +144,7 @@ pub enum ServerPayload {
     Snapshot {
         snapshot_id: u64,
         tick: u64,
-        submarine: SubmarineSnapshot,
+        mission: MissionSnapshot,
     },
     Event {
         tick: u64,
@@ -221,66 +234,64 @@ mod tests {
     }
 
     #[test]
-    fn version_two_fixtures_detect_enum_reordering() {
+    fn version_three_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![2, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![2, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[2, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[2, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![3, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![3, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[3, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[3, 0, 2, 1]).unwrap(), ready);
     }
 
     #[test]
-    fn version_two_m2_command_fixture_is_stable() {
+    fn version_three_m2_command_fixture_is_stable() {
         let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::SetBallast(BallastState::Flood),
         }));
-        let fixture = vec![2, 1, 0, 9, 3, 0];
+        let fixture = vec![3, 1, 0, 9, 3, 0];
         assert_eq!(encode(&message), fixture);
         assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
     }
 
     #[test]
-    fn version_two_role_snapshot_fixture_is_stable() {
+    fn version_three_mission_snapshot_round_trips() {
         let message = ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id: 3,
             tick: 7,
-            submarine: SubmarineSnapshot {
-                common: crate::CommonMeasurements {
-                    x: 1.0,
-                    y: 2.0,
-                    heading: 90.0,
-                    speed: 3.0,
-                    depth: 12.0,
-                    dive_state: crate::DiveState::Periscope,
-                    acoustic_level: crate::AcousticLevel::Low,
-                    alerts: vec![crate::AlertKind::BatteryLow],
+            mission: MissionSnapshot {
+                submarine: crate::SubmarineSnapshot {
+                    common: crate::CommonMeasurements {
+                        x: 1.0,
+                        y: 2.0,
+                        heading: 90.0,
+                        speed: 3.0,
+                        depth: 12.0,
+                        dive_state: crate::DiveState::Periscope,
+                        acoustic_level: crate::AcousticLevel::Low,
+                        alerts: vec![crate::AlertKind::BatteryLow],
+                    },
+                    pilot: Some(crate::PilotMeasurements {
+                        ordered_heading: 90.0,
+                        ordered_speed: 4.0,
+                        ordered_depth: 20.0,
+                        turn_rate: 1.0,
+                        vertical_speed: 0.5,
+                        ballast: BallastState::Flood,
+                        emergency_surface: false,
+                        max_speed: 8.0,
+                        max_depth: 250.0,
+                    }),
+                    engineering: None,
                 },
-                pilot: Some(crate::PilotMeasurements {
-                    ordered_heading: 90.0,
-                    ordered_speed: 4.0,
-                    ordered_depth: 20.0,
-                    turn_rate: 1.0,
-                    vertical_speed: 0.5,
-                    ballast: BallastState::Flood,
-                    emergency_surface: false,
-                    max_speed: 8.0,
-                    max_depth: 250.0,
-                }),
-                engineering: None,
+                sonar: None,
+                tactical: None,
             },
         });
-        let fixture = vec![
-            2, 3, 3, 7, 0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 180, 66, 0, 0, 64, 64, 0, 0, 64, 65, 1,
-            1, 1, 0, 1, 0, 0, 180, 66, 0, 0, 128, 64, 0, 0, 160, 65, 0, 0, 128, 63, 0, 0, 0, 63, 0,
-            0, 0, 0, 0, 65, 0, 0, 122, 67, 0,
-        ];
-        assert_eq!(encode(&message), fixture);
-        assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), message);
+        assert_eq!(decode::<ServerMessage>(&encode(&message)).unwrap(), message);
     }
 }

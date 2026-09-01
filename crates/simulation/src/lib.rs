@@ -1,15 +1,56 @@
+mod detection;
+mod tracks;
+mod world;
+
 use shared::{
     AcousticLevel, AlertKind, BallastState, DiveState, GameEvent, MissionConfig, PilotOrder,
-    PlayerCommand, SubmarineState, ALERT_KINDS,
+    PlayerCommand, ProtocolError, SonarMeasurements, SonarObservation, SubmarineState,
+    TacticalMeasurements, TrackId, ALERT_KINDS,
 };
 
+use tracks::{TrackError, Tracker};
+use world::World;
+
 const KNOTS_TO_METERS_PER_SECOND: f32 = 0.514_444;
+const PASSIVE_INTERVAL_TICKS: u64 = 20;
+const PING_COOLDOWN_SECONDS: f32 = 8.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimulationError {
+    TrackNotFound(TrackId),
+    InvalidTrackMerge,
+    SonarPingCoolingDown,
+}
+
+impl From<TrackError> for SimulationError {
+    fn from(error: TrackError) -> Self {
+        match error {
+            TrackError::NotFound(id) => Self::TrackNotFound(id),
+            TrackError::InvalidMerge => Self::InvalidTrackMerge,
+        }
+    }
+}
+
+impl From<SimulationError> for ProtocolError {
+    fn from(error: SimulationError) -> Self {
+        match error {
+            SimulationError::TrackNotFound(id) => Self::TrackNotFound(id),
+            SimulationError::InvalidTrackMerge => Self::InvalidTrackMerge,
+            SimulationError::SonarPingCoolingDown => Self::SonarPingCoolingDown,
+        }
+    }
+}
 
 pub struct Simulation {
     pub state: SubmarineState,
     pub config: MissionConfig,
     pub tick: u64,
     active_alerts: [bool; ALERT_KINDS.len()],
+    world: World,
+    tracker: Tracker,
+    observations: Vec<SonarObservation>,
+    next_observation_id: u64,
+    ping_cooldown_remaining: f32,
 }
 
 impl Simulation {
@@ -23,6 +64,11 @@ impl Simulation {
             config,
             tick: 0,
             active_alerts: [false; ALERT_KINDS.len()],
+            world: World::new(config.seed),
+            tracker: Tracker::default(),
+            observations: Vec::new(),
+            next_observation_id: 0,
+            ping_cooldown_remaining: 0.0,
         }
     }
 
@@ -42,11 +88,27 @@ impl Simulation {
         self.update_resources(dt);
         self.update_acoustic_signature();
         self.sanitize_state();
+        self.world.update(dt);
+        self.ping_cooldown_remaining = (self.ping_cooldown_remaining - dt).max(0.0);
         self.tick = self.tick.wrapping_add(1);
+        self.tracker.update(self.tick, &self.state, dt);
+        if self.tick % PASSIVE_INTERVAL_TICKS == 0 {
+            let observations = detection::passive_observations(
+                &self.world,
+                &self.state,
+                self.config.seed,
+                self.tick,
+                &mut self.next_observation_id,
+            );
+            self.record_observations(observations);
+        }
         self.update_alerts()
     }
 
-    pub fn apply_command(&mut self, command: PlayerCommand) -> Vec<GameEvent> {
+    pub fn apply_command(
+        &mut self,
+        command: PlayerCommand,
+    ) -> Result<Vec<GameEvent>, SimulationError> {
         let parameters = self.config.submarine;
         match command {
             PlayerCommand::SetHeading(value) if value.is_finite() => {
@@ -69,7 +131,7 @@ impl Simulation {
                 self.state.emergency_surface = true;
                 self.state.ordered_depth = 0.0;
                 self.state.ballast = BallastState::Blow;
-                return vec![GameEvent::EmergencySurfaceStarted];
+                return Ok(vec![GameEvent::EmergencySurfaceStarted]);
             }
             PlayerCommand::SetDiesels(enabled) => {
                 self.state.propulsion.diesels_on = enabled && self.air_intake_available();
@@ -84,27 +146,53 @@ impl Simulation {
                 self.state.propulsion.charging = enabled;
             }
             PlayerCommand::FireTorpedo { bearing } if bearing.is_finite() => {
-                return vec![GameEvent::TorpedoFired {
+                return Ok(vec![GameEvent::TorpedoFired {
                     bearing: bearing.rem_euclid(360.0),
-                }];
+                }]);
             }
             PlayerCommand::RepairSystem(id) => {
-                return vec![GameEvent::SystemRepaired(id)];
+                return Ok(vec![GameEvent::SystemRepaired(id)]);
             }
-            PlayerCommand::SonarPing => {}
+            PlayerCommand::SonarPing => {
+                if self.ping_cooldown_remaining > 0.0 {
+                    return Err(SimulationError::SonarPingCoolingDown);
+                }
+                self.ping_cooldown_remaining = PING_COOLDOWN_SECONDS;
+                let observations = detection::active_observations(
+                    &self.world,
+                    &self.state,
+                    self.config.seed,
+                    self.tick,
+                    &mut self.next_observation_id,
+                );
+                self.record_observations(observations);
+                self.world.observe_active_ping(&self.state, self.tick);
+            }
+            PlayerCommand::MergeTracks { primary, secondary } => {
+                self.tracker.merge(primary, secondary)?;
+            }
+            PlayerCommand::SetTrackShared { track_id, shared } => {
+                self.tracker.set_shared(track_id, shared)?;
+            }
+            PlayerCommand::DropTrack(track_id) => {
+                self.tracker.drop_track(track_id)?;
+            }
             _ => {}
         }
-        vec![]
+        Ok(vec![])
     }
 
-    pub fn apply_pilot_order(&mut self, order: PilotOrder) -> Vec<GameEvent> {
+    pub fn apply_pilot_order(
+        &mut self,
+        order: PilotOrder,
+    ) -> Result<Vec<GameEvent>, SimulationError> {
         let mut events = Vec::new();
         for command in [
             PlayerCommand::SetHeading(order.heading),
             PlayerCommand::SetSpeed(order.speed),
             PlayerCommand::SetDepth(order.depth),
         ] {
-            events.extend(self.apply_command(command));
+            events.extend(self.apply_command(command)?);
         }
         self.state.ballast = if order.depth > self.state.depth + 1.0 {
             BallastState::Flood
@@ -113,7 +201,7 @@ impl Simulation {
         } else {
             BallastState::Hold
         };
-        events
+        Ok(events)
     }
 
     pub fn automate_engineer(&mut self) {
@@ -122,6 +210,34 @@ impl Simulation {
         self.state.propulsion.diesels_on = intake;
         self.state.propulsion.ventilation_on = intake;
         self.state.propulsion.charging = intake && self.state.battery < 99.9;
+    }
+
+    pub fn automate_sonar(&mut self) {
+        let track_ids: Vec<_> = self
+            .tracker
+            .estimates()
+            .into_iter()
+            .filter(|track| track.confidence >= 60.0 && !track.shared)
+            .map(|track| track.id)
+            .collect();
+        for track_id in track_ids {
+            let _ = self.tracker.set_shared(track_id, true);
+        }
+    }
+
+    pub fn sonar_measurements(&self) -> SonarMeasurements {
+        SonarMeasurements {
+            observations: self.observations.clone(),
+            tracks: self.tracker.estimates(),
+            own_noise: self.state.acoustic_signature,
+            ping_cooldown_remaining: self.ping_cooldown_remaining,
+        }
+    }
+
+    pub fn shared_track_measurements(&self) -> TacticalMeasurements {
+        TacticalMeasurements {
+            shared_tracks: self.tracker.shared_estimates(),
+        }
     }
 
     pub fn air_intake_available(&self) -> bool {
@@ -351,6 +467,21 @@ impl Simulation {
         self.state.battery = self.state.battery.clamp(0.0, 100.0);
         self.state.oxygen = self.state.oxygen.clamp(0.0, 100.0);
     }
+
+    fn record_observations(&mut self, samples: Vec<detection::DetectionSample>) {
+        for sample in &samples {
+            self.tracker.associate(sample, &self.state);
+        }
+        let observations = samples
+            .into_iter()
+            .map(|sample| sample.observation)
+            .collect::<Vec<_>>();
+        self.observations.extend(observations);
+        if self.observations.len() > 64 {
+            self.observations
+                .drain(..self.observations.len().saturating_sub(64));
+        }
+    }
 }
 
 impl Default for Simulation {
@@ -382,9 +513,9 @@ mod tests {
     #[test]
     fn commands_set_orders_without_teleporting_state() {
         let mut sim = Simulation::new();
-        sim.apply_command(PlayerCommand::SetHeading(90.0));
-        sim.apply_command(PlayerCommand::SetSpeed(10.0));
-        sim.apply_command(PlayerCommand::SetDepth(50.0));
+        sim.apply_command(PlayerCommand::SetHeading(90.0)).unwrap();
+        sim.apply_command(PlayerCommand::SetSpeed(10.0)).unwrap();
+        sim.apply_command(PlayerCommand::SetDepth(50.0)).unwrap();
 
         assert_eq!(sim.state.ordered_heading, 90.0);
         assert_eq!(sim.state.ordered_speed, 10.0);
@@ -401,7 +532,8 @@ mod tests {
             heading: 90.0,
             speed: 18.0,
             depth: 100.0,
-        });
+        })
+        .unwrap();
         sim.tick(1.0);
 
         assert_approx_eq(sim.state.heading, sim.config.submarine.turn_rate);
@@ -412,9 +544,12 @@ mod tests {
     #[test]
     fn non_finite_commands_are_ignored_and_state_stays_finite() {
         let mut sim = Simulation::new();
-        sim.apply_command(PlayerCommand::SetHeading(f32::NAN));
-        sim.apply_command(PlayerCommand::SetDepth(f32::INFINITY));
-        sim.apply_command(PlayerCommand::SetSpeed(f32::NEG_INFINITY));
+        sim.apply_command(PlayerCommand::SetHeading(f32::NAN))
+            .unwrap();
+        sim.apply_command(PlayerCommand::SetDepth(f32::INFINITY))
+            .unwrap();
+        sim.apply_command(PlayerCommand::SetSpeed(f32::NEG_INFINITY))
+            .unwrap();
         sim.tick(0.05);
 
         assert!(sim.state.x.is_finite());
@@ -437,7 +572,7 @@ mod tests {
     #[test]
     fn diesels_cannot_run_without_air_intake() {
         let mut sim = submerged_simulation(0.0);
-        sim.apply_command(PlayerCommand::SetDiesels(true));
+        sim.apply_command(PlayerCommand::SetDiesels(true)).unwrap();
         sim.tick(0.05);
         assert!(!sim.state.propulsion.diesels_on);
     }
@@ -464,7 +599,8 @@ mod tests {
                 heading: 0.0,
                 speed: 2.0,
                 depth: 40.0,
-            });
+            })
+            .unwrap();
             for _ in 0..600 {
                 sim.tick(0.05);
             }
@@ -492,7 +628,7 @@ mod tests {
     #[test]
     fn emergency_surface_returns_to_surface() {
         let mut sim = submerged_simulation(2.0);
-        sim.apply_command(PlayerCommand::EmergencySurface);
+        sim.apply_command(PlayerCommand::EmergencySurface).unwrap();
         for _ in 0..400 {
             sim.tick(0.05);
         }
@@ -504,8 +640,8 @@ mod tests {
     #[test]
     fn depth_order_cancels_emergency_ascent() {
         let mut sim = submerged_simulation(2.0);
-        sim.apply_command(PlayerCommand::EmergencySurface);
-        sim.apply_command(PlayerCommand::SetDepth(80.0));
+        sim.apply_command(PlayerCommand::EmergencySurface).unwrap();
+        sim.apply_command(PlayerCommand::SetDepth(80.0)).unwrap();
         sim.tick(1.0);
 
         assert!(!sim.state.emergency_surface);
@@ -534,8 +670,8 @@ mod tests {
         };
         let mut first = Simulation::with_config(config);
         let mut second = Simulation::with_config(config);
-        first.apply_pilot_order(order);
-        second.apply_pilot_order(order);
+        first.apply_pilot_order(order).unwrap();
+        second.apply_pilot_order(order).unwrap();
         for _ in 0..100 {
             first.tick(0.05);
             second.tick(0.05);
@@ -545,13 +681,204 @@ mod tests {
     }
 
     #[test]
+    fn sonar_world_and_noise_are_deterministic() {
+        let mut first = submerged_simulation(0.0);
+        let mut second = submerged_simulation(0.0);
+        for _ in 0..60 {
+            first.tick(0.05);
+            second.tick(0.05);
+        }
+
+        assert_eq!(first.world, second.world);
+        assert_eq!(first.sonar_measurements(), second.sonar_measurements());
+        assert_eq!(first.world.vessels.len(), 3);
+    }
+
+    #[test]
+    fn own_noise_reduces_passive_detection_and_never_reveals_distance() {
+        let mut quiet = submerged_simulation(0.0);
+        let mut loud = Simulation::new();
+        loud.state.speed = loud.config.submarine.max_surface_speed;
+        loud.state.ordered_speed = loud.state.speed;
+        for _ in 0..20 {
+            quiet.tick(0.05);
+            loud.tick(0.05);
+        }
+
+        let quiet_measurements = quiet.sonar_measurements();
+        let loud_measurements = loud.sonar_measurements();
+        assert!(!quiet_measurements.observations.is_empty());
+        assert!(loud_measurements.observations.len() < quiet_measurements.observations.len());
+        assert!(quiet_measurements
+            .observations
+            .iter()
+            .all(
+                |observation| observation.mode == shared::ObservationMode::Passive
+                    && observation.distance.is_none()
+                    && observation.distance_uncertainty.is_none()
+            ));
+    }
+
+    #[test]
+    fn repeated_passive_observations_produce_range_without_revealing_it_publicly() {
+        let mut sim = submerged_simulation(0.0);
+        for _ in 0..60 {
+            sim.tick(0.05);
+        }
+
+        let measurements = sim.sonar_measurements();
+        assert!(measurements
+            .observations
+            .iter()
+            .all(|observation| observation.distance.is_none()
+                && observation.distance_uncertainty.is_none()));
+        assert!(measurements
+            .tracks
+            .iter()
+            .any(|track| { track.distance.is_some() && track.distance_uncertainty.is_some() }));
+    }
+
+    #[test]
+    fn repeated_observations_estimate_finite_bounded_motion() {
+        let mut sim = submerged_simulation(0.0);
+        for _ in 0..80 {
+            sim.tick(0.05);
+        }
+
+        assert!(sim.sonar_measurements().tracks.iter().any(|track| {
+            track.heading.is_some_and(|heading| heading.is_finite())
+                && track
+                    .speed
+                    .is_some_and(|speed| speed.is_finite() && (0.0..=40.0).contains(&speed))
+        }));
+    }
+
+    #[test]
+    fn silent_convoy_keeps_multiple_distinct_tracks() {
+        let mut sim = submerged_simulation(0.0);
+        for _ in 0..80 {
+            sim.tick(0.05);
+        }
+
+        let current_tracks = sim
+            .sonar_measurements()
+            .tracks
+            .into_iter()
+            .filter(|track| track.last_observation_tick == sim.tick)
+            .count();
+        assert!(
+            current_tracks >= 3,
+            "expected a track for each nearby vessel"
+        );
+    }
+
+    #[test]
+    fn active_ping_has_cooldown_and_creates_only_an_imperfect_private_enemy_track() {
+        let mut sim = submerged_simulation(0.0);
+        sim.apply_command(PlayerCommand::SonarPing).unwrap();
+
+        assert_eq!(
+            sim.apply_command(PlayerCommand::SonarPing),
+            Err(SimulationError::SonarPingCoolingDown)
+        );
+        let active = sim.sonar_measurements();
+        assert!(active.observations.iter().all(|observation| {
+            observation.mode == shared::ObservationMode::Active
+                && observation.distance.is_some()
+                && observation.distance_uncertainty.is_some()
+        }));
+        let enemy_track = sim.world.enemy_track().expect("escort should hear ping");
+        assert!(enemy_track.2 > 0.0);
+        assert_ne!((enemy_track.0, enemy_track.1), (sim.state.x, sim.state.y));
+
+        for _ in 0..160 {
+            sim.tick(0.05);
+        }
+        sim.apply_command(PlayerCommand::SonarPing).unwrap();
+    }
+
+    #[test]
+    fn active_ping_reuses_tracks_created_by_a_passive_scan_on_the_same_tick() {
+        let mut sim = submerged_simulation(0.0);
+        for _ in 0..20 {
+            sim.tick(0.05);
+        }
+        let passive_track_count = sim.sonar_measurements().tracks.len();
+
+        sim.apply_command(PlayerCommand::SonarPing).unwrap();
+
+        assert_eq!(sim.sonar_measurements().tracks.len(), passive_track_count);
+    }
+
+    #[test]
+    fn unobserved_track_loses_confidence_and_drifts() {
+        let mut sim = submerged_simulation(0.0);
+        for _ in 0..80 {
+            sim.tick(0.05);
+        }
+        let initial = sim
+            .sonar_measurements()
+            .tracks
+            .into_iter()
+            .find(|track| track.heading.is_some() && track.distance.is_some())
+            .expect("passive scans should establish a moving track");
+        sim.world.vessels.clear();
+        for _ in 0..100 {
+            sim.tick(0.05);
+        }
+        let drifted = sim
+            .sonar_measurements()
+            .tracks
+            .into_iter()
+            .find(|track| track.id == initial.id)
+            .unwrap();
+
+        assert!(drifted.confidence < initial.confidence);
+        assert!(drifted.bearing_uncertainty > initial.bearing_uncertainty);
+        assert!(drifted.distance_uncertainty > initial.distance_uncertainty);
+        assert_ne!(drifted.distance, initial.distance);
+    }
+
+    #[test]
+    fn tracks_can_be_shared_merged_and_dropped() {
+        let mut sim = submerged_simulation(0.0);
+        sim.apply_command(PlayerCommand::SonarPing).unwrap();
+        let tracks = sim.sonar_measurements().tracks;
+        assert!(tracks.len() >= 2);
+        let primary = tracks[0].id;
+        let secondary = tracks[1].id;
+
+        sim.apply_command(PlayerCommand::SetTrackShared {
+            track_id: secondary,
+            shared: true,
+        })
+        .unwrap();
+        assert_eq!(sim.shared_track_measurements().shared_tracks.len(), 1);
+
+        sim.apply_command(PlayerCommand::MergeTracks { primary, secondary })
+            .unwrap();
+        let shared = sim.shared_track_measurements().shared_tracks;
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0].id, primary);
+
+        sim.apply_command(PlayerCommand::DropTrack(primary))
+            .unwrap();
+        assert!(sim.shared_track_measurements().shared_tracks.is_empty());
+        assert_eq!(
+            sim.apply_command(PlayerCommand::DropTrack(primary)),
+            Err(SimulationError::TrackNotFound(primary))
+        );
+    }
+
+    #[test]
     fn submarine_can_dive_run_silently_and_resurface_with_resources() {
         let mut sim = Simulation::new();
         sim.apply_pilot_order(PilotOrder {
             heading: 45.0,
             speed: 2.0,
             depth: 40.0,
-        });
+        })
+        .unwrap();
         for _ in 0..600 {
             sim.automate_engineer();
             sim.tick(0.05);
@@ -568,7 +895,8 @@ mod tests {
             heading: 45.0,
             speed: 2.0,
             depth: 0.0,
-        });
+        })
+        .unwrap();
         for _ in 0..600 {
             sim.automate_engineer();
             sim.tick(0.05);

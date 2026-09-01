@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use shared::{
     CommandId, CommonMeasurements, CrewRole, DiveState, EngineeringMeasurements, MissionConfig,
-    PilotMeasurements, PilotOrder, PlayerCommand, PlayerId, ProtocolError, ServerMessage,
-    ServerPayload, SubmarineSnapshot,
+    MissionSnapshot, PilotMeasurements, PilotOrder, PlayerCommand, PlayerId, ProtocolError,
+    ServerMessage, ServerPayload, SubmarineSnapshot,
 };
 use simulation::Simulation;
 use tokio::sync::mpsc;
@@ -40,6 +40,9 @@ pub async fn run(
                 for event in sim.tick(0.05) {
                     broadcast(&players, ServerPayload::Event { tick: sim.tick, event });
                 }
+                if !human_roles.contains(&CrewRole::Sonar) {
+                    sim.automate_sonar();
+                }
                 snapshot_id = snapshot_id.wrapping_add(1);
                 send_snapshots(&players, &sim, snapshot_id);
             }
@@ -62,7 +65,7 @@ fn handle_command(
     let result = match request.action {
         GameRoomAction::Player(command) => {
             if command_allowed_for_role(request.role, &command) {
-                Ok(sim.apply_command(command))
+                sim.apply_command(command).map_err(ProtocolError::from)
             } else {
                 Err(ProtocolError::CommandNotAllowedForRole)
             }
@@ -73,7 +76,7 @@ fn handle_command(
             } else if human_roles.contains(&CrewRole::Pilot) {
                 Err(ProtocolError::PilotControlledByHuman)
             } else {
-                Ok(sim.apply_pilot_order(order))
+                sim.apply_pilot_order(order).map_err(ProtocolError::from)
             }
         }
     };
@@ -111,16 +114,20 @@ fn command_allowed_for_role(role: CrewRole, command: &PlayerCommand) -> bool {
                 | PlayerCommand::SetSpeed(_)
                 | PlayerCommand::SetBallast(_)
                 | PlayerCommand::EmergencySurface
-        ) | (CrewRole::Sonar, PlayerCommand::SonarPing)
-            | (
-                CrewRole::Engineer,
-                PlayerCommand::RepairSystem(_)
-                    | PlayerCommand::SetDiesels(_)
-                    | PlayerCommand::SetElectricMotors(_)
-                    | PlayerCommand::SetVentilation(_)
-                    | PlayerCommand::SetBatteryCharging(_)
-            )
-            | (CrewRole::Weapons, PlayerCommand::FireTorpedo { .. })
+        ) | (
+            CrewRole::Sonar,
+            PlayerCommand::SonarPing
+                | PlayerCommand::MergeTracks { .. }
+                | PlayerCommand::SetTrackShared { .. }
+                | PlayerCommand::DropTrack(_)
+        ) | (
+            CrewRole::Engineer,
+            PlayerCommand::RepairSystem(_)
+                | PlayerCommand::SetDiesels(_)
+                | PlayerCommand::SetElectricMotors(_)
+                | PlayerCommand::SetVentilation(_)
+                | PlayerCommand::SetBatteryCharging(_)
+        ) | (CrewRole::Weapons, PlayerCommand::FireTorpedo { .. })
     )
 }
 
@@ -153,8 +160,17 @@ fn send_snapshots(
         let _ = tx.try_send(ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id,
             tick: sim.tick,
-            submarine: project_submarine(sim, *role),
+            mission: project_mission(sim, *role),
         }));
+    }
+}
+
+fn project_mission(sim: &Simulation, role: CrewRole) -> MissionSnapshot {
+    MissionSnapshot {
+        submarine: project_submarine(sim, role),
+        sonar: (role == CrewRole::Sonar).then(|| sim.sonar_measurements()),
+        tactical: matches!(role, CrewRole::Captain | CrewRole::Weapons)
+            .then(|| sim.shared_track_measurements()),
     }
 }
 
@@ -294,7 +310,7 @@ mod tests {
         let config = MissionConfig::new(44);
         let mut first = Simulation::with_config(config);
         let mut second = Simulation::with_config(config);
-        first.apply_command(PlayerCommand::SetSpeed(10.0));
+        first.apply_command(PlayerCommand::SetSpeed(10.0)).unwrap();
 
         first.tick(1.0);
         second.tick(1.0);
@@ -336,15 +352,33 @@ mod tests {
     #[test]
     fn projections_only_include_role_specific_measurements() {
         let sim = Simulation::new();
-        let pilot = project_submarine(&sim, CrewRole::Pilot);
-        let engineer = project_submarine(&sim, CrewRole::Engineer);
-        let sonar = project_submarine(&sim, CrewRole::Sonar);
+        let pilot = project_mission(&sim, CrewRole::Pilot);
+        let engineer = project_mission(&sim, CrewRole::Engineer);
+        let sonar = project_mission(&sim, CrewRole::Sonar);
+        let captain = project_mission(&sim, CrewRole::Captain);
 
-        assert!(pilot.pilot.is_some());
-        assert!(pilot.engineering.is_none());
-        assert!(engineer.pilot.is_none());
-        assert!(engineer.engineering.is_some());
-        assert!(sonar.pilot.is_none());
-        assert!(sonar.engineering.is_none());
+        assert!(pilot.submarine.pilot.is_some());
+        assert!(pilot.submarine.engineering.is_none());
+        assert!(pilot.sonar.is_none());
+        assert!(pilot.tactical.is_none());
+        assert!(engineer.submarine.pilot.is_none());
+        assert!(engineer.submarine.engineering.is_some());
+        assert!(sonar.submarine.pilot.is_none());
+        assert!(sonar.submarine.engineering.is_none());
+        assert!(sonar.sonar.is_some());
+        assert!(sonar.tactical.is_none());
+        assert!(captain.sonar.is_none());
+        assert!(captain.tactical.is_some());
+    }
+
+    #[test]
+    fn sonar_track_commands_are_restricted_to_sonar_role() {
+        let command = PlayerCommand::SetTrackShared {
+            track_id: shared::TrackId(1),
+            shared: true,
+        };
+        assert!(command_allowed_for_role(CrewRole::Sonar, &command));
+        assert!(!command_allowed_for_role(CrewRole::Captain, &command));
+        assert!(!command_allowed_for_role(CrewRole::Weapons, &command));
     }
 }

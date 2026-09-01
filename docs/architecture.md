@@ -110,12 +110,12 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Lobby | registre en mémoire, codes courts, rôles uniques, prêts, démarrage explicite dès un joueur et bots | persistance et reprise éventuelles |
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
 | Navigation | consignes et valeurs réelles, inertie, plongée, ballasts et remontée d'urgence | assiette, stabilité et effets des avaries |
-| Sonar | commande sans effet | observations, pistes incertaines et signature acoustique |
+| Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
 | Armement | événement de tir immédiat | tubes, solution de tir et entités torpilles |
 | Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation et recharge | distribution détaillée, compartiments, avaries et réparations temporisées |
-| IA | ordre structuré du capitaine au bot Pilote | autres bots de poste et navires ennemis déterministes |
-| Client | lobby tactile, poste Pilote inertiel, poste Ingénierie, bruit et alertes partagées | cinq interfaces responsive et état de reconnexion |
-| Protocole | version 2, identifiants opaques, commandes M2, tick et projections par rôle | reprise et vues des contacts observables |
+| IA | bots Pilote/Ingénierie minimaux, partage automatique du bot Sonar et route de convoi | bots de poste complets et comportement tactique ennemi |
+| Client | lobby et postes tactiles Pilote, Ingénierie, Sonar, plus carte Capitaine/Armement | interfaces Armement complètes et état de reconnexion |
+| Protocole | version 3, identifiants opaques, observations et pistes projetées par rôle | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -130,7 +130,7 @@ C4Container
     System_Boundary(game, "Submarine Game") {
         Container(client, "Client web", "Rust, Bevy 0.19, WASM, WebGL2", "Sélection du rôle, commandes et rendu 2D")
         Container(server, "Serveur de jeu", "Rust, Axum, Tokio", "Lobby WebSocket et boucle autoritaire à 20 Hz")
-        Container(simulation, "Simulation", "Rust", "Navigation déterministe et application des commandes")
+        Container(simulation, "Simulation", "Rust", "Navigation, convoi, détection et pistes déterministes")
         Container(shared, "Modèle partagé", "Rust, serde, postcard", "État et protocole réseau")
     }
     Rel(player, client, "Interagit", "Tactile / souris / clavier")
@@ -148,12 +148,13 @@ C4Container
 - `CrewRole`, `SystemId`, `SystemStatus` et `SubmarineState` ;
 - enveloppes versionnées, identifiants de salle/session/joueur/commande et séparation lobby/mission ;
 - état de lobby, configuration de mission, tick et snapshot numérotés ;
+- observations Sonar, pistes opaques et projections tactiques par rôle ;
 - `PlayerCommand`, `GameEvent` et erreurs liées aux commandes ;
 - codec `postcard`.
 
 **Cible :**
 
-- identifiants opaques d'entité et de piste ;
+- identifiants opaques d'entité supplémentaires ;
 - négociation de plusieurs versions et informations de compatibilité ;
 - vues observables par rôle, sans exposer l'état secret de l'ennemi ;
 - types d'erreur stables et affichables.
@@ -162,7 +163,7 @@ C4Container
 
 ### 5.3 Crate `simulation`
 
-**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil et automatisation minimale de l'Ingénierie bot.
+**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil, convoi déterministe, détection passive/active, pistes incertaines et automatisation minimale des bots Ingénierie et Sonar.
 
 **Composants cibles :**
 
@@ -182,7 +183,7 @@ Les systèmes sont exécutés dans un ordre stable à chaque tick. Toute dépend
 
 ### 5.4 Crate `server`
 
-**Existant :** route WebSocket, registre de salles en mémoire, attribution de rôles uniques, prêts, démarrage explicite, validation des commandes, projections M2 par rôle et une tâche de simulation à 20 Hz par salle.
+**Existant :** route WebSocket, registre de salles en mémoire, attribution de rôles uniques, prêts, démarrage explicite, validation des commandes, projections du sous-marin et des pistes par rôle, et une tâche de simulation à 20 Hz par salle.
 
 **Composants cibles :**
 
@@ -200,7 +201,7 @@ Une salle possède une seule file séquentielle de commandes. Un client lent ne 
 
 ### 5.5 Crate `client`
 
-**Existant :** connexion `ewebsock` en ressource `NonSend`, URL dérivée de l'origine, création/rejoint de salle, sélection de rôle, lobby minimal, interpolation, interface du pilote et ordre tactile du capitaine au bot Pilote.
+**Existant :** connexion `ewebsock` en ressource `NonSend`, URL dérivée de l'origine, création/rejoint de salle, sélection de rôle, lobby minimal, interpolation, postes tactiles Pilote, Ingénierie et Sonar, carte tactique Capitaine/Armement et ordre du capitaine au bot Pilote.
 
 **Composants cibles :**
 

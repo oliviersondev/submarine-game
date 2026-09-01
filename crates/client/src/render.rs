@@ -1,8 +1,10 @@
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use shared::{
-    AlertKind, BallastState, CrewRole, EngineeringMeasurements, LobbyCommand, PilotOrder,
-    PlayerCommand, ProtocolError, RoleOccupant, RoomId, SubmarineSnapshot,
+    AlertKind, BallastState, ContactClassification, CrewRole, EngineeringMeasurements,
+    LobbyCommand, ObservationMode, PilotOrder, PlayerCommand, ProtocolError, RoleOccupant, RoomId,
+    SonarObservation, SubmarineSnapshot, TrackEstimate, TrackId,
 };
 
 use crate::network::{controls_for_role, CommandQueue, GameState, LocalPlayer, RoomRequest};
@@ -71,6 +73,73 @@ struct EngineerPanel;
 #[derive(Component)]
 struct EngineerTelemetry;
 
+#[derive(Component)]
+struct SonarPanel;
+
+#[derive(Component)]
+struct TacticalPanel;
+
+#[derive(Component)]
+struct StationBody;
+
+#[derive(Component)]
+struct SonarSummary;
+
+#[derive(Component)]
+struct ObservationList;
+
+#[derive(Component)]
+struct SonarTrackSlot(usize);
+
+#[derive(Component)]
+struct SonarTrackList;
+
+#[derive(Component)]
+struct SonarTrackScrollStart(Vec2);
+
+#[derive(Component)]
+struct TacticalTrackList;
+
+#[derive(Component)]
+struct PolarMarker {
+    index: usize,
+    tactical: bool,
+}
+
+#[derive(Clone, Copy, Component)]
+enum SonarAction {
+    Ping,
+    Share,
+    Merge,
+    Drop,
+}
+
+#[derive(Resource, Default, Debug, PartialEq, Eq)]
+struct SonarUiState {
+    primary: Option<TrackId>,
+    secondary: Option<TrackId>,
+}
+
+impl SonarUiState {
+    fn select(&mut self, track_id: TrackId) {
+        if self.primary == Some(track_id) {
+            self.primary = self.secondary.take();
+        } else if self.secondary == Some(track_id) {
+            self.secondary = None;
+        } else if self.primary.is_none() {
+            self.primary = Some(track_id);
+        } else {
+            self.secondary = Some(track_id);
+        }
+    }
+
+    fn retain_tracks(&mut self, tracks: &[TrackEstimate]) {
+        let exists = |id| tracks.iter().any(|track| track.id == id);
+        self.primary = self.primary.filter(|id| exists(*id));
+        self.secondary = self.secondary.filter(|id| exists(*id));
+    }
+}
+
 #[derive(Clone, Copy, Component)]
 enum EngineerControl {
     Diesels,
@@ -126,6 +195,7 @@ pub struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InterpolationState>()
+            .init_resource::<SonarUiState>()
             .add_systems(Startup, setup_scene)
             .add_systems(
                 Update,
@@ -136,6 +206,9 @@ impl Plugin for RenderPlugin {
                     update_selector_error.after(crate::network::NetworkReceiveSet),
                     update_room_code,
                     update_pilot_station,
+                    update_sonar_station,
+                    update_tactical_station,
+                    update_polar_markers,
                     update_lobby_action_layout,
                     update_selector_layout,
                     update_station_layout,
@@ -147,6 +220,14 @@ impl Plugin for RenderPlugin {
                     pilot_button_system,
                     pilot_action_system,
                     engineer_button_system,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    sonar_track_button_system,
+                    sonar_action_system,
+                    scroll_sonar_tracks,
                 ),
             );
 
@@ -220,6 +301,8 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
 
     spawn_pilot_station(&mut commands, &player);
     spawn_engineer_station(&mut commands, &player);
+    spawn_sonar_station(&mut commands, &player);
+    spawn_tactical_station(&mut commands, &player);
     spawn_lobby_actions(&mut commands, &player);
 }
 
@@ -483,7 +566,7 @@ fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
                 ..default()
             },
             BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
-            GlobalZIndex(20),
+            GlobalZIndex(40),
             lobby_action_visibility(player, action),
         ));
     }
@@ -600,15 +683,25 @@ fn update_station_layout(
             Option<&HudPanel>,
             Option<&PilotPanel>,
             Option<&EngineerPanel>,
+            Option<&SonarPanel>,
+            Option<&TacticalPanel>,
+            Option<&StationBody>,
         ),
-        Or<(With<HudPanel>, With<PilotPanel>, With<EngineerPanel>)>,
+        Or<(
+            With<HudPanel>,
+            With<PilotPanel>,
+            With<EngineerPanel>,
+            With<SonarPanel>,
+            With<TacticalPanel>,
+            With<StationBody>,
+        )>,
     >,
     mut hud_text: Single<&mut TextFont, With<HudText>>,
 ) {
     let landscape = compact_landscape(window.width(), window.height());
     hud_text.font_size = FontSize::Px(if landscape { 13.0 } else { 17.0 });
 
-    for (mut node, hud, pilot, engineer) in &mut nodes {
+    for (mut node, hud, pilot, engineer, sonar, tactical, body) in &mut nodes {
         if hud.is_some() {
             node.left = px(16);
             node.top = px(16);
@@ -623,23 +716,40 @@ fn update_station_layout(
                 node.width = Val::Auto;
                 node.max_width = px(520);
             }
-        } else if pilot.is_some() || engineer.is_some() {
+        } else if body.is_some() {
+            node.flex_direction = if landscape {
+                FlexDirection::Row
+            } else {
+                FlexDirection::Column
+            };
+            node.column_gap = px(if landscape { 8 } else { 0 });
+            node.row_gap = px(if landscape { 0 } else { 6 });
+        } else if pilot.is_some() || engineer.is_some() || sonar.is_some() || tactical.is_some() {
             node.right = px(16);
             node.bottom = px(16);
-            if landscape {
+            if landscape && (pilot.is_some() || engineer.is_some()) {
                 node.left = px(276);
                 node.top = px(16);
                 node.width = Val::Auto;
                 node.max_width = Val::Auto;
                 node.padding = UiRect::all(px(10));
                 node.row_gap = px(if pilot.is_some() { 4 } else { 6 });
-            } else {
+            } else if pilot.is_some() || engineer.is_some() {
                 node.left = px(16);
                 node.top = Val::Auto;
                 node.width = Val::Auto;
                 node.max_width = px(if pilot.is_some() { 760 } else { 620 });
                 node.padding = UiRect::all(px(14));
                 node.row_gap = px(if pilot.is_some() { 8 } else { 10 });
+            } else {
+                node.left = px(8);
+                node.right = px(8);
+                node.top = px(8);
+                node.bottom = px(8);
+                node.width = Val::Auto;
+                node.max_width = Val::Auto;
+                node.padding = UiRect::all(px(if landscape { 8 } else { 10 }));
+                node.row_gap = px(6);
             }
         }
     }
@@ -870,6 +980,351 @@ fn spawn_engineer_station(commands: &mut Commands, player: &LocalPlayer) {
         });
 }
 
+fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
+    commands
+        .spawn((
+            SonarPanel,
+            station_panel_node(),
+            BackgroundColor(Color::srgba(0.01, 0.055, 0.075, 0.97)),
+            BorderColor::all(Color::srgba(0.15, 0.85, 0.95, 0.85)),
+            GlobalZIndex(30),
+            sonar_visibility(player, false),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new("POSTE SONAR // ANALYSE ACOUSTIQUE"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.95, 1.0)),
+            ));
+            panel
+                .spawn((
+                    StationBody,
+                    Node {
+                        width: percent(100),
+                        flex_grow: 1.0,
+                        min_height: px(0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(6),
+                        ..default()
+                    },
+                ))
+                .with_children(|body| {
+                    body.spawn(Node {
+                        flex_basis: px(0),
+                        flex_grow: 1.0,
+                        min_width: px(150),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
+                        ..default()
+                    })
+                    .with_children(|left| {
+                        left.spawn((
+                            SonarSummary,
+                            Text::new("BRUIT PROPRE --- // PING ---"),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.72, 0.9, 0.94)),
+                        ));
+                        spawn_polar_map(left, false);
+                        left.spawn((
+                            ObservationList,
+                            Text::new("OBSERVATIONS // AUCUNE"),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.62, 0.82, 0.86)),
+                            Node {
+                                min_height: px(34),
+                                ..default()
+                            },
+                        ));
+                    });
+                    body.spawn(Node {
+                        flex_basis: px(0),
+                        flex_grow: 1.0,
+                        min_height: px(0),
+                        min_width: px(174),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
+                        ..default()
+                    })
+                    .with_children(|right| {
+                        right.spawn((
+                            Text::new("PISTES // TOUCHER // GLISSER POUR DEFILER"),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.55, 0.78, 0.82)),
+                        ));
+                        right
+                            .spawn((
+                                SonarTrackList,
+                                SonarTrackScrollStart(Vec2::ZERO),
+                                ScrollPosition(Vec2::ZERO),
+                                Node {
+                                    width: percent(100),
+                                    flex_basis: px(0),
+                                    flex_grow: 1.0,
+                                    min_height: px(88),
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: px(4),
+                                    overflow: Overflow::scroll_y(),
+                                    scrollbar_width: 6.0,
+                                    ..default()
+                                },
+                            ))
+                            .observe(
+                                |drag: On<Pointer<Drag>>,
+                                 ui_scale: Res<UiScale>,
+                                 mut list: Single<
+                                    (&ComputedNode, &mut ScrollPosition, &SonarTrackScrollStart),
+                                    With<SonarTrackList>,
+                                >| {
+                                    let range = (list.0.content_size.y - list.0.size.y).max(0.0)
+                                        * list.0.inverse_scale_factor;
+                                    list.1 .0.y = (list.2 .0.y - drag.distance.y / ui_scale.0)
+                                        .clamp(0.0, range);
+                                },
+                            )
+                            .observe(
+                                |_: On<Pointer<DragStart>>,
+                                 mut list: Single<
+                                    (&ComputedNode, &mut SonarTrackScrollStart),
+                                    With<SonarTrackList>,
+                                >| {
+                                    list.1 .0 =
+                                        list.0.scroll_position * list.0.inverse_scale_factor;
+                                },
+                            )
+                            .with_children(|tracks| {
+                                for index in 0..8 {
+                                    tracks.spawn((
+                                        SonarTrackSlot(index),
+                                        Button,
+                                        Text::new("PISTE ---"),
+                                        TextFont {
+                                            font_size: FontSize::Px(11.0),
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                                        touch_button_node(),
+                                        BackgroundColor(Color::srgb(0.035, 0.14, 0.18)),
+                                        Visibility::Hidden,
+                                    ));
+                                }
+                            });
+                        right
+                            .spawn(Node {
+                                width: percent(100),
+                                min_height: px(44),
+                                flex_shrink: 0.0,
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: px(4),
+                                row_gap: px(4),
+                                ..default()
+                            })
+                            .with_children(|actions| {
+                                for (action, label) in [
+                                    (SonarAction::Ping, "PING"),
+                                    (SonarAction::Share, "PARTAGER / RETIRER"),
+                                    (SonarAction::Merge, "FUSIONNER"),
+                                    (SonarAction::Drop, "ABANDONNER"),
+                                ] {
+                                    actions.spawn((
+                                        action,
+                                        Button,
+                                        Text::new(label),
+                                        TextFont {
+                                            font_size: FontSize::Px(11.0),
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.82, 0.95, 1.0)),
+                                        Node {
+                                            min_width: px(106),
+                                            height: px(44),
+                                            flex_grow: 1.0,
+                                            padding: UiRect::horizontal(px(8)),
+                                            align_items: AlignItems::Center,
+                                            justify_content: JustifyContent::Center,
+                                            border_radius: BorderRadius::all(px(4)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
+                                    ));
+                                }
+                            });
+                    });
+                });
+        });
+}
+
+fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
+    commands
+        .spawn((
+            TacticalPanel,
+            station_panel_node(),
+            BackgroundColor(Color::srgba(0.01, 0.055, 0.075, 0.97)),
+            BorderColor::all(Color::srgba(0.15, 0.85, 0.95, 0.85)),
+            GlobalZIndex(30),
+            tactical_visibility(player, false),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new("SITUATION TACTIQUE // PISTES PARTAGEES UNIQUEMENT"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.95, 1.0)),
+            ));
+            panel
+                .spawn((
+                    StationBody,
+                    Node {
+                        width: percent(100),
+                        flex_grow: 1.0,
+                        min_height: px(0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(6),
+                        ..default()
+                    },
+                ))
+                .with_children(|body| {
+                    body.spawn(Node {
+                        flex_basis: px(0),
+                        flex_grow: 1.0,
+                        min_width: px(150),
+                        ..default()
+                    })
+                    .with_children(|map| spawn_polar_map(map, true));
+                    body.spawn((
+                        TacticalTrackList,
+                        Text::new("AUCUNE PISTE PARTAGEE"),
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.75, 0.92, 0.95)),
+                        Node {
+                            flex_basis: px(0),
+                            flex_grow: 1.0,
+                            min_width: px(174),
+                            padding: UiRect::all(px(8)),
+                            border: UiRect::all(px(1)),
+                            ..default()
+                        },
+                        BorderColor::all(Color::srgba(0.15, 0.7, 0.8, 0.35)),
+                    ));
+                });
+        });
+}
+
+fn station_panel_node() -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: px(8),
+        right: px(8),
+        top: px(8),
+        bottom: px(8),
+        padding: UiRect::all(px(10)),
+        border: UiRect::all(px(1)),
+        border_radius: BorderRadius::all(px(8)),
+        flex_direction: FlexDirection::Column,
+        row_gap: px(6),
+        ..default()
+    }
+}
+
+fn touch_button_node() -> Node {
+    Node {
+        width: percent(100),
+        min_height: px(44),
+        flex_shrink: 0.0,
+        padding: UiRect::axes(px(8), px(4)),
+        align_items: AlignItems::Center,
+        border: UiRect::all(px(1)),
+        border_radius: BorderRadius::all(px(4)),
+        ..default()
+    }
+}
+
+fn scroll_sonar_tracks(
+    mut wheel_events: MessageReader<MouseWheel>,
+    mut list: Single<(&ComputedNode, &mut ScrollPosition), With<SonarTrackList>>,
+) {
+    let range = (list.0.content_size.y - list.0.size.y).max(0.0) * list.0.inverse_scale_factor;
+    for event in wheel_events.read() {
+        let delta = match event.unit {
+            MouseScrollUnit::Line => event.y * 44.0,
+            MouseScrollUnit::Pixel => event.y,
+        };
+        list.1 .0.y = (list.1 .0.y - delta).clamp(0.0, range);
+    }
+}
+
+fn spawn_polar_map(parent: &mut ChildSpawnerCommands, tactical: bool) {
+    parent
+        .spawn((
+            Node {
+                width: percent(100),
+                flex_grow: 1.0,
+                min_height: px(116),
+                position_type: PositionType::Relative,
+                border: UiRect::all(px(1)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.015, 0.09, 0.12)),
+            BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.55)),
+        ))
+        .with_children(|map| {
+            for (label, left, top) in [
+                ("N 000", 43.0, 1.0),
+                ("E 090", 81.0, 45.0),
+                ("S 180", 43.0, 86.0),
+                ("W 270", 1.0, 45.0),
+                ("SOUS-MARIN", 38.0, 46.0),
+            ] {
+                map.spawn((
+                    Text::new(label),
+                    TextFont {
+                        font_size: FontSize::Px(if label == "SOUS-MARIN" { 9.0 } else { 10.0 }),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.35, 0.65, 0.7)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: percent(left),
+                        top: percent(top),
+                        ..default()
+                    },
+                ));
+            }
+            for index in 0..8 {
+                map.spawn((
+                    PolarMarker { index, tactical },
+                    Text::new("T--"),
+                    TextFont {
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.78, 0.35)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        ..default()
+                    },
+                    Visibility::Hidden,
+                ));
+            }
+        });
+}
+
 fn spawn_pilot_button(
     parent: &mut ChildSpawnerCommands,
     metric: PilotMetric,
@@ -1006,6 +1461,8 @@ fn update_panel_visibility(
             Option<&RoleSelector>,
             Option<&PilotPanel>,
             Option<&EngineerPanel>,
+            Option<&SonarPanel>,
+            Option<&TacticalPanel>,
             Option<&LobbyPanel>,
             Option<&LobbyAction>,
         ),
@@ -1014,6 +1471,8 @@ fn update_panel_visibility(
             With<RoleSelector>,
             With<PilotPanel>,
             With<EngineerPanel>,
+            With<SonarPanel>,
+            With<TacticalPanel>,
             With<LobbyPanel>,
         )>,
     >,
@@ -1022,12 +1481,19 @@ fn update_panel_visibility(
         return;
     }
 
-    for (mut visibility, hud, selector, pilot, engineer, lobby, lobby_action) in &mut panels {
+    for (mut visibility, hud, selector, pilot, engineer, sonar, tactical, lobby, lobby_action) in
+        &mut panels
+    {
         let lobby_action_visible = lobby_action.is_some_and(|action| match action {
             LobbyAction::Ready | LobbyAction::Start => !state.game_started,
             LobbyAction::OrderPilot => state.game_started && player.role == Some(CrewRole::Captain),
         });
-        *visibility = if (hud.is_some() && player.id.is_some())
+        let dedicated_fullscreen_station = state.game_started
+            && matches!(
+                player.role,
+                Some(CrewRole::Sonar | CrewRole::Captain | CrewRole::Weapons)
+            );
+        *visibility = if (hud.is_some() && player.id.is_some() && !dedicated_fullscreen_station)
             || (selector.is_some() && player.id.is_none())
             || (pilot.is_some()
                 && player.role == Some(CrewRole::Pilot)
@@ -1037,12 +1503,41 @@ fn update_panel_visibility(
                 && player.role == Some(CrewRole::Engineer)
                 && player.id.is_some()
                 && state.game_started)
+            || (sonar.is_some()
+                && player.role == Some(CrewRole::Sonar)
+                && player.id.is_some()
+                && state.game_started
+                && state.sonar.is_some())
+            || (tactical.is_some()
+                && matches!(player.role, Some(CrewRole::Captain | CrewRole::Weapons))
+                && player.id.is_some()
+                && state.game_started
+                && state.tactical.is_some())
             || (lobby.is_some() && player.id.is_some() && lobby_action_visible)
         {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+fn sonar_visibility(player: &LocalPlayer, game_started: bool) -> Visibility {
+    if player.role == Some(CrewRole::Sonar) && player.id.is_some() && game_started {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    }
+}
+
+fn tactical_visibility(player: &LocalPlayer, game_started: bool) -> Visibility {
+    if matches!(player.role, Some(CrewRole::Captain | CrewRole::Weapons))
+        && player.id.is_some()
+        && game_started
+    {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
     }
 }
 
@@ -1104,6 +1599,352 @@ fn update_pilot_station(
         .and_then(|submarine| submarine.engineering.as_ref())
         .map(engineering_text)
         .unwrap_or_else(|| "BATTERIE --- // OXYGENE --- // CHARGE ---".to_owned());
+}
+
+fn update_sonar_station(
+    state: Res<GameState>,
+    mut ui: ResMut<SonarUiState>,
+    mut summary: Single<
+        &mut Text,
+        (
+            With<SonarSummary>,
+            Without<ObservationList>,
+            Without<SonarTrackSlot>,
+            Without<SonarAction>,
+        ),
+    >,
+    mut observations: Single<
+        &mut Text,
+        (
+            With<ObservationList>,
+            Without<SonarSummary>,
+            Without<SonarTrackSlot>,
+            Without<SonarAction>,
+        ),
+    >,
+    mut slots: Query<
+        (
+            &SonarTrackSlot,
+            &mut Text,
+            &mut Visibility,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (
+            Without<SonarAction>,
+            Without<SonarSummary>,
+            Without<ObservationList>,
+        ),
+    >,
+    mut actions: Query<
+        (&SonarAction, &mut Text, &mut BackgroundColor),
+        (
+            Without<SonarTrackSlot>,
+            Without<SonarSummary>,
+            Without<ObservationList>,
+        ),
+    >,
+) {
+    let Some(sonar) = &state.sonar else {
+        return;
+    };
+    ui.retain_tracks(&sonar.tracks);
+    summary.0 = format!(
+        "BRUIT PROPRE {:>5.1} // PING {}",
+        sonar.own_noise,
+        if sonar.ping_cooldown_remaining > 0.0 {
+            format!("RECHARGE {:.1}s", sonar.ping_cooldown_remaining)
+        } else {
+            "PRET".to_owned()
+        }
+    );
+    observations.0 = observation_list(&sonar.observations);
+
+    for (slot, mut text, mut visibility, mut background, mut border) in &mut slots {
+        let Some(track) = sonar.tracks.get(slot.0) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        *visibility = Visibility::Visible;
+        text.0 = track_line(track, state.server_tick);
+        let selection = if ui.primary == Some(track.id) {
+            Some("PRIMAIRE")
+        } else if ui.secondary == Some(track.id) {
+            Some("SECONDAIRE")
+        } else {
+            None
+        };
+        *background = BackgroundColor(if selection.is_some() {
+            Color::srgb(0.05, 0.31, 0.38)
+        } else {
+            Color::srgb(0.035, 0.14, 0.18)
+        });
+        *border = BorderColor::all(if selection.is_some() {
+            Color::srgb(0.3, 0.9, 1.0)
+        } else {
+            Color::srgba(0.2, 0.75, 0.9, 0.25)
+        });
+        if let Some(selection) = selection {
+            text.0 = format!("{selection} // {}", text.0);
+        }
+    }
+
+    for (action, mut text, mut background) in &mut actions {
+        let enabled = sonar_action_enabled(*action, sonar, &ui);
+        if matches!(action, SonarAction::Ping) {
+            text.0 = if enabled {
+                "PING".to_owned()
+            } else {
+                format!("PING {:.1}s", sonar.ping_cooldown_remaining.max(0.0))
+            };
+        }
+        *background = BackgroundColor(if enabled {
+            Color::srgb(0.04, 0.2, 0.26)
+        } else {
+            Color::srgb(0.035, 0.075, 0.085)
+        });
+    }
+}
+
+fn update_tactical_station(
+    state: Res<GameState>,
+    mut list: Single<&mut Text, With<TacticalTrackList>>,
+) {
+    let Some(tactical) = &state.tactical else {
+        return;
+    };
+    let own_state = state
+        .submarine
+        .as_ref()
+        .map(|submarine| {
+            format!(
+                "BATIMENT // CAP {:03.0} deg // {:.1} kn // PROF. {:.0} m\n\n",
+                submarine.common.heading, submarine.common.speed, submarine.common.depth
+            )
+        })
+        .unwrap_or_default();
+    list.0 = if tactical.shared_tracks.is_empty() {
+        format!(
+            "{own_state}AUCUNE PISTE PARTAGEE\n\nLa carte ne montre aucune verite ennemie non observee."
+        )
+    } else {
+        let tracks = tactical
+            .shared_tracks
+            .iter()
+            .map(|track| track_line(track, state.server_tick))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        format!("{own_state}{tracks}")
+    };
+}
+
+fn update_polar_markers(
+    state: Res<GameState>,
+    mut markers: Query<(&PolarMarker, &mut Text, &mut Node, &mut Visibility)>,
+) {
+    for (marker, mut text, mut node, mut visibility) in &mut markers {
+        let track = if marker.tactical {
+            state
+                .tactical
+                .as_ref()
+                .and_then(|tactical| tactical.shared_tracks.get(marker.index))
+        } else {
+            state
+                .sonar
+                .as_ref()
+                .and_then(|sonar| sonar.tracks.get(marker.index))
+        };
+        let Some(track) = track else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let (left, top) = polar_position(track);
+        node.left = percent(left);
+        node.top = percent(top);
+        text.0 = format!("T{}", track.id.0);
+        *visibility = Visibility::Visible;
+    }
+}
+
+fn sonar_track_button_system(
+    buttons: Query<(&Interaction, &SonarTrackSlot), Changed<Interaction>>,
+    state: Res<GameState>,
+    mut ui: ResMut<SonarUiState>,
+) {
+    let Some(sonar) = &state.sonar else {
+        return;
+    };
+    for (interaction, slot) in &buttons {
+        if *interaction == Interaction::Pressed {
+            if let Some(track) = sonar.tracks.get(slot.0) {
+                ui.select(track.id);
+            }
+        }
+    }
+}
+
+fn sonar_action_system(
+    buttons: Query<(&Interaction, &SonarAction), Changed<Interaction>>,
+    state: Res<GameState>,
+    mut ui: ResMut<SonarUiState>,
+    mut commands: ResMut<CommandQueue>,
+) {
+    let Some(sonar) = &state.sonar else {
+        return;
+    };
+    for (interaction, action) in &buttons {
+        if *interaction != Interaction::Pressed || !sonar_action_enabled(*action, sonar, &ui) {
+            continue;
+        }
+        match action {
+            SonarAction::Ping => commands.push(PlayerCommand::SonarPing),
+            SonarAction::Share => {
+                let track_id = ui.primary.expect("share action requires primary track");
+                let shared = sonar
+                    .tracks
+                    .iter()
+                    .find(|track| track.id == track_id)
+                    .is_some_and(|track| track.shared);
+                commands.push(PlayerCommand::SetTrackShared {
+                    track_id,
+                    shared: !shared,
+                });
+            }
+            SonarAction::Merge => {
+                commands.push(PlayerCommand::MergeTracks {
+                    primary: ui.primary.expect("merge action requires primary track"),
+                    secondary: ui.secondary.expect("merge action requires secondary track"),
+                });
+            }
+            SonarAction::Drop => {
+                commands.push(PlayerCommand::DropTrack(
+                    ui.primary.expect("drop action requires primary track"),
+                ));
+                ui.primary = ui.secondary.take();
+            }
+        }
+    }
+}
+
+fn sonar_action_enabled(
+    action: SonarAction,
+    sonar: &shared::SonarMeasurements,
+    ui: &SonarUiState,
+) -> bool {
+    match action {
+        SonarAction::Ping => sonar.ping_cooldown_remaining <= 0.0,
+        SonarAction::Share | SonarAction::Drop => ui.primary.is_some(),
+        SonarAction::Merge => match (ui.primary, ui.secondary) {
+            (Some(primary), Some(secondary)) => {
+                let bearing = |id| {
+                    sonar
+                        .tracks
+                        .iter()
+                        .find(|track| track.id == id)
+                        .map(|track| track.bearing)
+                };
+                match (bearing(primary), bearing(secondary)) {
+                    (Some(first), Some(second)) => angular_distance(first, second) <= 35.0,
+                    _ => false,
+                }
+            }
+            _ => false,
+        },
+    }
+}
+
+fn angular_distance(first: f32, second: f32) -> f32 {
+    ((first - second + 180.0).rem_euclid(360.0) - 180.0).abs()
+}
+
+fn observation_list(observations: &[SonarObservation]) -> String {
+    if observations.is_empty() {
+        return "OBSERVATIONS // AUCUNE".to_owned();
+    }
+    let lines = observations
+        .iter()
+        .rev()
+        .take(3)
+        .map(|observation| {
+            let mode = match observation.mode {
+                ObservationMode::Passive => "PASSIF",
+                ObservationMode::Active => "ACTIF",
+            };
+            format!(
+                "{} {}{} // {}",
+                mode,
+                bearing_to_display(observation.bearing),
+                uncertainty_label(observation.bearing_uncertainty),
+                distance_label(observation.distance, observation.distance_uncertainty)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("DERNIERES OBSERVATIONS\n{lines}")
+}
+
+fn track_line(track: &TrackEstimate, server_tick: u64) -> String {
+    format!(
+        "T{} {}{} // {}\nCONF {:.0}% // {} // AGE {}t // {}",
+        track.id.0,
+        bearing_to_display(track.bearing),
+        uncertainty_label(track.bearing_uncertainty),
+        distance_label(track.distance, track.distance_uncertainty),
+        track.confidence,
+        classification_label(track.classification),
+        server_tick.saturating_sub(track.last_observation_tick),
+        if track.shared { "PARTAGEE" } else { "LOCALE" }
+    )
+}
+
+fn bearing_to_display(bearing: f32) -> String {
+    let normalized = bearing.rem_euclid(360.0);
+    let cardinal = match ((normalized + 22.5) / 45.0).floor() as u8 % 8 {
+        0 => "N",
+        1 => "NE",
+        2 => "E",
+        3 => "SE",
+        4 => "S",
+        5 => "SO",
+        6 => "O",
+        _ => "NO",
+    };
+    format!("{:03.0} deg {cardinal}", normalized)
+}
+
+fn uncertainty_label(uncertainty: f32) -> String {
+    format!(" +/-{:.1} deg", uncertainty.max(0.0))
+}
+
+fn distance_label(distance: Option<f32>, uncertainty: Option<f32>) -> String {
+    match distance {
+        Some(distance) => format!(
+            "DIST {:.0} m{}",
+            distance,
+            uncertainty
+                .map(|value| format!(" +/-{value:.0} m"))
+                .unwrap_or_default()
+        ),
+        None => "DIST INCONNUE (RAYON CONVENTIONNEL)".to_owned(),
+    }
+}
+
+fn classification_label(classification: ContactClassification) -> &'static str {
+    match classification {
+        ContactClassification::Unknown => "INCONNUE",
+        ContactClassification::Merchant => "MARCHAND",
+        ContactClassification::Escort => "ESCORTE",
+    }
+}
+
+fn polar_position(track: &TrackEstimate) -> (f32, f32) {
+    let angle = track.bearing.rem_euclid(360.0).to_radians();
+    let radius = track
+        .distance
+        .map(|distance| (distance / 10_000.0).clamp(0.16, 1.0))
+        .unwrap_or(0.72)
+        * 40.0;
+    (50.0 + angle.sin() * radius, 50.0 - angle.cos() * radius)
 }
 
 fn update_selector_error(
@@ -1628,6 +2469,11 @@ fn error_label(error: &ProtocolError) -> String {
         }
         ProtocolError::InvalidRoomCode => "CODE SALLE INVALIDE : 6 CHIFFRES REQUIS".to_owned(),
         ProtocolError::ConnectionFailed => "CONNEXION AU SERVEUR IMPOSSIBLE".to_owned(),
+        ProtocolError::TrackNotFound(track_id) => {
+            format!("PISTE T{} INTROUVABLE", track_id.0)
+        }
+        ProtocolError::InvalidTrackMerge => "FUSION DE PISTES INVALIDE".to_owned(),
+        ProtocolError::SonarPingCoolingDown => "PING SONAR EN RECHARGE".to_owned(),
     }
 }
 
@@ -1638,6 +2484,16 @@ fn valid_room_code(code: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sonar_station_system_has_disjoint_mutable_text_queries() {
+        let mut app = App::new();
+        app.init_resource::<GameState>()
+            .init_resource::<SonarUiState>()
+            .add_systems(Update, update_sonar_station);
+
+        app.update();
+    }
 
     #[test]
     fn interpolates_position() {
@@ -1785,6 +2641,51 @@ mod tests {
         assert!(!viewport_size_changed(360.0, 640.0, 360.4, 639.6));
         assert!(viewport_size_changed(360.0, 640.0, 361.0, 640.0));
         assert!(viewport_size_changed(360.0, 640.0, 360.0, 641.0));
+    }
+
+    #[test]
+    fn bearing_display_normalizes_and_uses_french_cardinals() {
+        assert_eq!(bearing_to_display(0.0), "000 deg N");
+        assert_eq!(bearing_to_display(91.0), "091 deg E");
+        assert_eq!(bearing_to_display(-45.0), "315 deg NO");
+        assert_eq!(bearing_to_display(361.0), "001 deg N");
+    }
+
+    #[test]
+    fn sonar_selection_builds_and_reduces_a_merge_pair() {
+        let mut ui = SonarUiState::default();
+        ui.select(TrackId(3));
+        ui.select(TrackId(7));
+
+        assert_eq!(ui.primary, Some(TrackId(3)));
+        assert_eq!(ui.secondary, Some(TrackId(7)));
+
+        ui.select(TrackId(3));
+        assert_eq!(ui.primary, Some(TrackId(7)));
+        assert_eq!(ui.secondary, None);
+    }
+
+    #[test]
+    fn unknown_range_uses_conventional_polar_radius() {
+        let track = TrackEstimate {
+            id: TrackId(1),
+            bearing: 90.0,
+            bearing_uncertainty: 4.0,
+            distance: None,
+            distance_uncertainty: None,
+            heading: None,
+            speed: None,
+            classification: ContactClassification::Unknown,
+            confidence: 30.0,
+            last_observation_tick: 1,
+            shared: true,
+        };
+
+        let (left, top) = polar_position(&track);
+        assert!((left - 78.8).abs() < 0.01);
+        assert!((top - 50.0).abs() < 0.01);
+        assert!(distance_label(track.distance, track.distance_uncertainty)
+            .contains("RAYON CONVENTIONNEL"));
     }
 
     #[test]

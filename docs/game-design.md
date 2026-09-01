@@ -293,6 +293,8 @@ La confiance augmente avec des observations cohérentes et diminue lorsque le co
 
 **Sonar actif :** produit rapidement relèvement et distance plus précis, mais crée une forte signature détectable et peut déclencher une réaction ennemie.
 
+Paramètres M3 provisoires : l'écoute passive produit un balayage par seconde, le ping actif possède un délai de huit secondes et les pistes expirent après environ une minute sans observation exploitable. Ces valeurs servent à valider la boucle de détection avant les sessions d'équilibrage.
+
 ### 6.6 Comportement ennemi
 
 Les navires marchands suivent une route et tentent de rejoindre une zone de sortie. Les escortes utilisent une machine à états :
