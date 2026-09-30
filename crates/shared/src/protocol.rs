@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{BallastState, CrewRole, MissionSnapshot, SubmarineConfig, SystemId, TrackId};
 
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -20,6 +20,7 @@ pub struct CommandId(pub u64);
 pub struct MissionConfig {
     pub seed: u64,
     pub submarine: SubmarineConfig,
+    pub weapons: crate::WeaponsConfig,
 }
 
 impl MissionConfig {
@@ -27,6 +28,7 @@ impl MissionConfig {
         Self {
             seed,
             submarine: SubmarineConfig::default(),
+            weapons: crate::WeaponsConfig::default(),
         }
     }
 }
@@ -50,7 +52,7 @@ pub enum PlayerCommand {
     SetVentilation(bool),
     SetBatteryCharging(bool),
     FireTorpedo {
-        bearing: f32,
+        tube: u8,
     },
     RepairSystem(SystemId),
     SonarPing,
@@ -63,6 +65,22 @@ pub enum PlayerCommand {
         shared: bool,
     },
     DropTrack(TrackId),
+    LoadTube(u8),
+    ConfigureShot {
+        tube: u8,
+        settings: crate::ShotSettings,
+    },
+    FloodTube(u8),
+    OpenTube(u8),
+    CloseTube(u8),
+    PurgeTube(u8),
+    AuthorizeShot {
+        tube: u8,
+        settings: crate::ShotSettings,
+    },
+    OrderWeaponsBot {
+        target: TrackId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +91,8 @@ pub enum GameEvent {
     SystemDamaged(SystemId),
     SystemRepaired(SystemId),
     TorpedoFired { bearing: f32 },
+    TorpedoImpact { torpedo_id: u64 },
+    TorpedoExpired { torpedo_id: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,6 +109,15 @@ pub enum ProtocolError {
     TrackNotFound(TrackId),
     InvalidTrackMerge,
     SonarPingCoolingDown,
+    InvalidTube,
+    InvalidTubePhase,
+    NoTorpedoes,
+    InvalidShotSettings,
+    TrackNotShared,
+    NoFiringSolution,
+    ShotNotAuthorized,
+    LaunchDepthExceeded,
+    WeaponsControlledByHuman,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,6 +160,9 @@ pub struct ServerMessage {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ServerPayload {
+    CommandAccepted {
+        command_id: CommandId,
+    },
     SessionJoined {
         session_id: SessionId,
         player_id: PlayerId,
@@ -234,32 +266,67 @@ mod tests {
     }
 
     #[test]
-    fn version_three_fixtures_detect_enum_reordering() {
+    fn version_four_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![3, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![3, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[3, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[3, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![4, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![4, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[4, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[4, 0, 2, 1]).unwrap(), ready);
     }
 
     #[test]
-    fn version_three_m2_command_fixture_is_stable() {
+    fn version_four_m2_command_fixture_is_stable() {
         let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::SetBallast(BallastState::Flood),
         }));
-        let fixture = vec![3, 1, 0, 9, 3, 0];
+        let fixture = vec![4, 1, 0, 9, 3, 0];
         assert_eq!(encode(&message), fixture);
         assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
     }
 
     #[test]
-    fn version_three_mission_snapshot_round_trips() {
+    fn version_four_weapons_and_acknowledgment_fixtures_are_stable() {
+        let load = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
+            command_id: CommandId(9),
+            command: PlayerCommand::LoadTube(0),
+        }));
+        let fire = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
+            command_id: CommandId(9),
+            command: PlayerCommand::FireTorpedo { tube: 0 },
+        }));
+        for (message, fixture) in [
+            (load, vec![4, 1, 0, 9, 15, 0]),
+            (fire, vec![4, 1, 0, 9, 9, 0]),
+        ] {
+            assert_eq!(encode(&message), fixture);
+            assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
+        }
+        let ack = ServerMessage::new(ServerPayload::CommandAccepted {
+            command_id: CommandId(9),
+        });
+        assert_eq!(encode(&ack), vec![4, 0, 9]);
+        assert_eq!(decode::<ServerMessage>(&[4, 0, 9]).unwrap(), ack);
+        let configured = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
+            command_id: CommandId(10),
+            command: PlayerCommand::ConfigureShot {
+                tube: 4,
+                settings: crate::ShotSettings::for_target(TrackId(42)),
+            },
+        }));
+        assert_eq!(
+            decode::<ClientMessage>(&encode(&configured)).unwrap(),
+            configured
+        );
+    }
+
+    #[test]
+    fn version_four_mission_snapshot_round_trips() {
         let message = ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id: 3,
             tick: 7,
@@ -290,6 +357,7 @@ mod tests {
                 },
                 sonar: None,
                 tactical: None,
+                weapons: None,
             },
         });
         assert_eq!(decode::<ServerMessage>(&encode(&message)).unwrap(), message);

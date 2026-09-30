@@ -326,6 +326,12 @@ Les erreurs possibles proviennent notamment de :
 
 Une torpille existe comme entité simulée après son lancement. Elle possède une position, une profondeur, un cap, une vitesse, une autonomie et un état. Un impact est déterminé par la simulation, pas par un événement immédiat au moment du tir.
 
+**Règles M4 retenues :** solution automatique depuis une piste partagée, avec corrections manuelles du cap cible (±45°) et de sa vitesse (±10 nœuds). Le Capitaine autorise un tube et sa configuration (piste, profondeur et corrections) ; l'Armement déclenche après une confirmation tactile distincte. Une reconfiguration, une fermeture ou une purge annule l'autorisation. Une piste absente ou non partagée interdit le lancement. Le bot Capitaine autorise les solutions disponibles ; lorsque l'Armement est également vacant, il donne un ordre de préparation sur une piste marchande partagée de confiance au moins 70 %. Le bot Armement prépare uniquement sur ordre et attend l'autorisation avant de lancer.
+
+Une seule torpille non guidée est disponible en M4 : cap fixe calculé au lancement, vitesse de 40 nœuds, autonomie de 8 000 m, profondeur configurée entre 1 et 15 m et convergence verticale de 1,5 m/s depuis la profondeur du sous-marin. Le lancement exige une profondeur du sous-marin ≤20 m et une solution à ±90° de l'axe du tube (avant ou arrière). Les navires de surface sont touchables à une profondeur de torpille ≤8 m avec un rayon de collision simplifié de 35 m ; régler une torpille trop profondément peut donc faire manquer une cible.
+
+L'interface expose la confiance de piste, l'incertitude spatiale et les sources d'instabilité, sans pourcentage de réussite. Elle suit la course estimée des torpilles propres. Une explosion à moins de 6 000 m est observable, sans révéler la position, l'identité ou l'intégrité de la cible ; au-delà, la course estimée reste affichée jusqu'à épuisement prévu de l'autonomie.
+
 ### 6.8 Tubes et munitions
 
 Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torpilles prêtes ou en réserve. La séquence normale est :
@@ -339,6 +345,10 @@ Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torp
 7. recharger si une munition est disponible.
 
 Certaines étapes peuvent être automatisées par un ordre, mais leur durée, leur bruit et leurs conditions restent simulés.
+
+**Équilibrage M4 provisoire :** cinq tubes initialement vides et cinq torpilles en réserve ; chargement 20 s, inondation 8 s, ouverture/fermeture 3 s, purge 8 s. Le stock est réservé dès le début du chargement. La fermeture après lancement est automatique ; une purge est nécessaire avant rechargement. Purger un tube encore chargé conserve sa torpille. Chaque opération temporisée ajoute 8 points à la signature acoustique. Les paramètres principaux sont centralisés dans `WeaponsConfig`.
+
+Les bâtiments ennemis disposent d'une intégrité privée initiale de 100. Les dégâts par torpille sont configurables (100 par défaut) ; à zéro, le bâtiment coule, cesse de naviguer et ne produit plus d'observation sonar. Les navires survivants à moins de 3 000 m d'un impact observé changent leur route de 35°. La recherche et la riposte tactiques de l'escorte restent prévues en M5.
 
 ### 6.9 Dégâts et avaries
 

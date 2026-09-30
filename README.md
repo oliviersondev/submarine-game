@@ -35,10 +35,20 @@ Les commandes clavier permettent de tester le flux réseau avant l'ajout des int
 | `Pilot` | `←`/`→` cap, `↑`/`↓` vitesse, `PageUp`/`PageDown` profondeur |
 | `Sonar` | `Espace` ping sonar |
 | `Engineer` | `1` diesels, `2` moteurs électriques, `3` ventilation, `4` recharge, `5` réparation moteur |
-| `Weapons` | `Espace` tir dans le cap actuel |
-| `Captain` | Bouton tactile envoyant un ordre structuré au bot Pilote |
+| `Weapons` | Contrôles tactiles : piste, tube, réglages, préparation et confirmation du tir |
+| `Captain` | Ordre au bot Pilote, ordre de préparation au bot Armement et autorisation du tir |
 
 Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes actives et la dernière erreur. Le poste Pilote distingue consignes et mesures réelles et contrôle les ballasts ainsi que la remontée d'urgence. Le poste Ingénierie contrôle propulsion, ventilation et recharge. Le Sonar suit des observations imparfaites, gère ses pistes et les partage avec le Capitaine et l'Armement. Leur carte tactique ne montre que ces estimations partagées. Le Capitaine peut aussi transmettre au bot Pilote une consigne de cap, vitesse et profondeur.
+
+### Essayer une attaque M4
+
+1. Créer une salle au poste `Weapons` (`?role=weapons`), se déclarer prêt et démarrer. Le bot Sonar partage ses pistes lorsqu'elles deviennent fiables.
+2. Sélectionner une piste et un tube avant ; **Charger**, attendre 20 s, puis **Configurer**. Le bouton de réglage alterne profondeur de torpille, correction du cap cible et correction de sa vitesse ; `−` et `+` modifient le réglage, puis **Configurer** l'applique.
+3. **Inonder** (8 s), puis **Ouvrir** (3 s). Le bot Capitaine autorise une solution disponible. Un Capitaine humain utilise **Autoriser** sur le tube configuré.
+4. Le sous-marin doit être à 20 m ou moins et la solution dans le demi-plan du tube (avant, ou arrière pour le tube 5). **Tirer…**, puis **CONFIRMER TIR** lance une torpille non guidée à 40 nœuds, limitée à 8 km.
+5. Après le tir, la porte se ferme automatiquement (3 s) ; **Purger** (8 s) rend le tube rechargeable. Il existe cinq torpilles au total, réparties entre réserve et tubes.
+
+Au poste Capitaine, sélectionner une piste puis **Ordre bot** prépare une attaque si l'Armement est vacant ; **Autoriser** déclenche ensuite le tir du bot prêt. Sans humain aux postes Capitaine et Armement, le bot Capitaine désigne une piste marchande fiable. Les opérations de tube produisent du bruit. Les panneaux d'armement se parcourent par glissement si leur contenu dépasse l'écran. Les explosions ne sont rapportées qu'à portée d'écoute ; elles ne révèlent ni identité, ni position exacte, ni intégrité réelle d'un ennemi.
 
 ## Architecture
 
@@ -57,7 +67,7 @@ submarine-game/
     │       ├── protocol.rs # enveloppes versionnées, lobby, mission, identifiants et erreurs
     │       └── codec.rs    # encode() / decode() postcard
     ├── simulation/         # logique déterministe — NO async, NO Bevy
-    │   └── src/            # navigation, monde privé, détection et pistes
+    │   └── src/            # navigation, monde privé, détection, pistes et weapons.rs
     ├── server/             # Axum 0.8 + Tokio — binaire natif
     │   └── src/
     │       ├── main.rs     # écoute 0.0.0.0:3000, route /ws
@@ -67,7 +77,8 @@ submarine-game/
         ├── src/
         │   ├── main.rs     # App Bevy avec DefaultPlugins + plugins custom
         │   ├── network.rs  # WsConnection (NonSend), poll WebSocket, GameState
-        │   └── render.rs   # Camera2d, sprite sous-marin, update position/cap
+        │   ├── render.rs   # Camera2d, stations tactiles et carte
+        │   └── weapons_ui.rs # préparation, réglages et confirmation du tir
         ├── index.html      # page HTML servie par Trunk
         └── Trunk.toml      # serve :8080
 ```
@@ -123,7 +134,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `3`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 3 remplace directement la version 2 et transmet une projection de mission adaptée au rôle plutôt que l'état autoritaire complet.
+Chaque enveloppe porte `version: u16` (actuellement `4`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 4 remplace directement la version 3 : commandes explicites d'armement, configuration des torpilles, autorisation du Capitaine, projections des tubes et courses estimées, et accusés de réception par commande.
 
 ### Client → Serveur (`ClientPayload`)
 
@@ -140,6 +151,7 @@ Lobby(LobbySnapshot)                          // humains, bots et prêts
 MissionStarted { config }
 Snapshot { snapshot_id, tick, mission }
 Event { tick, event }
+CommandAccepted { command_id }
 Error { command_id, error }
 ```
 
@@ -173,12 +185,13 @@ make build-wasm
 ## Roadmap
 
 - [x] Déplacement de base du sous-marin (`simulation::tick`)
-- [ ] Interfaces des cinq stations complètes (Pilote, Ingénierie, Sonar et carte Capitaine livrés)
+- [ ] Interfaces des cinq stations finalisées sur mobile (postes minimaux et procédures M4 livrés)
 - [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v3 avec fixtures `postcard`, projections par rôle et ticks numérotés
+- [x] Protocole v4 avec fixtures `postcard`, projections par rôle, accusés et ticks numérotés
 - [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
 - [x] Convoi, observations, pistes incertaines et poste Sonar tactile (M3)
+- [x] Tubes, solution de tir, autorisation, torpilles et impacts simulés (M4)
 - [ ] Reconnexion avec snapshot d'état complet
 - [ ] Dockerfile + déploiement ECS Fargate

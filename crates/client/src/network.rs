@@ -165,6 +165,8 @@ pub struct GameState {
     pub submarine: Option<SubmarineSnapshot>,
     pub sonar: Option<SonarMeasurements>,
     pub tactical: Option<TacticalMeasurements>,
+    pub weapons: Option<shared::WeaponsMeasurements>,
+    pub last_accepted_command: Option<CommandId>,
     pub snapshot_id: u64,
     pub server_tick: u64,
     pub game_started: bool,
@@ -392,14 +394,7 @@ fn command_for_input(
                 None
             }
         }
-        CrewRole::Weapons => {
-            let submarine = state.submarine.as_ref()?;
-            keyboard
-                .just_pressed(KeyCode::Space)
-                .then_some(PlayerCommand::FireTorpedo {
-                    bearing: submarine.common.heading,
-                })
-        }
+        CrewRole::Weapons => None,
     }
 }
 
@@ -410,6 +405,10 @@ fn handle_server_message(
     commands: &mut CommandQueue,
 ) {
     match payload {
+        ServerPayload::CommandAccepted { command_id } => {
+            state.last_accepted_command = Some(command_id);
+            state.last_error = None;
+        }
         ServerPayload::SessionJoined {
             session_id,
             player_id,
@@ -437,6 +436,7 @@ fn handle_server_message(
                 state.previous_submarine = state.submarine.replace(mission.submarine);
                 state.sonar = mission.sonar;
                 state.tactical = mission.tactical;
+                state.weapons = mission.weapons;
                 state.snapshot_id = snapshot_id;
                 state.server_tick = tick;
             }
@@ -497,7 +497,7 @@ pub fn controls_for_role(role: CrewRole) -> &'static str {
         CrewRole::Engineer => {
             "1 diesels | 2 electrique | 3 ventilation | 4 recharge | 5 reparation"
         }
-        CrewRole::Weapons => "Pistes partagees en lecture seule\nEspace : tir dans le cap actuel",
+        CrewRole::Weapons => "Piste partagee / tube / preparation / confirmation tactile",
     }
 }
 

@@ -4,6 +4,7 @@ use bevy::window::WindowResolution;
 mod network;
 mod render;
 mod role;
+mod weapons_ui;
 
 fn main() {
     App::new()
@@ -20,5 +21,6 @@ fn main() {
         }))
         .add_plugins(network::NetworkPlugin)
         .add_plugins(render::RenderPlugin)
+        .add_plugins(weapons_ui::WeaponsUiPlugin)
         .run();
 }

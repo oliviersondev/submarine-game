@@ -43,6 +43,9 @@ pub async fn run(
                 if !human_roles.contains(&CrewRole::Sonar) {
                     sim.automate_sonar();
                 }
+                for event in sim.automate_weapons(!human_roles.contains(&CrewRole::Weapons), !human_roles.contains(&CrewRole::Captain)) {
+                    broadcast(&players, ServerPayload::Event { tick: sim.tick, event });
+                }
                 snapshot_id = snapshot_id.wrapping_add(1);
                 send_snapshots(&players, &sim, snapshot_id);
             }
@@ -65,7 +68,13 @@ fn handle_command(
     let result = match request.action {
         GameRoomAction::Player(command) => {
             if command_allowed_for_role(request.role, &command) {
-                sim.apply_command(command).map_err(ProtocolError::from)
+                if matches!(command, PlayerCommand::OrderWeaponsBot { .. })
+                    && human_roles.contains(&CrewRole::Weapons)
+                {
+                    Err(ProtocolError::WeaponsControlledByHuman)
+                } else {
+                    sim.apply_command(command).map_err(ProtocolError::from)
+                }
             } else {
                 Err(ProtocolError::CommandNotAllowedForRole)
             }
@@ -83,6 +92,13 @@ fn handle_command(
 
     match result {
         Ok(events) => {
+            send_to_player(
+                players,
+                request.player_id,
+                ServerPayload::CommandAccepted {
+                    command_id: request.command_id,
+                },
+            );
             for event in events {
                 broadcast(
                     players,
@@ -127,7 +143,19 @@ fn command_allowed_for_role(role: CrewRole, command: &PlayerCommand) -> bool {
                 | PlayerCommand::SetElectricMotors(_)
                 | PlayerCommand::SetVentilation(_)
                 | PlayerCommand::SetBatteryCharging(_)
-        ) | (CrewRole::Weapons, PlayerCommand::FireTorpedo { .. })
+        ) | (
+            CrewRole::Weapons,
+            PlayerCommand::FireTorpedo { .. }
+                | PlayerCommand::LoadTube(_)
+                | PlayerCommand::ConfigureShot { .. }
+                | PlayerCommand::FloodTube(_)
+                | PlayerCommand::OpenTube(_)
+                | PlayerCommand::CloseTube(_)
+                | PlayerCommand::PurgeTube(_)
+        ) | (
+            CrewRole::Captain,
+            PlayerCommand::AuthorizeShot { .. } | PlayerCommand::OrderWeaponsBot { .. }
+        )
     )
 }
 
@@ -146,7 +174,20 @@ fn broadcast(
     payload: ServerPayload,
 ) {
     let message = ServerMessage::new(payload);
-    for (_, tx) in players.values() {
+    for (role, tx) in players.values() {
+        if let ServerPayload::Event {
+            event:
+                shared::GameEvent::TorpedoImpact { .. } | shared::GameEvent::TorpedoExpired { .. },
+            ..
+        } = &message.payload
+        {
+            if !matches!(
+                role,
+                CrewRole::Captain | CrewRole::Weapons | CrewRole::Sonar
+            ) {
+                continue;
+            }
+        }
         let _ = tx.try_send(message.clone());
     }
 }
@@ -171,6 +212,8 @@ fn project_mission(sim: &Simulation, role: CrewRole) -> MissionSnapshot {
         sonar: (role == CrewRole::Sonar).then(|| sim.sonar_measurements()),
         tactical: matches!(role, CrewRole::Captain | CrewRole::Weapons)
             .then(|| sim.shared_track_measurements()),
+        weapons: matches!(role, CrewRole::Captain | CrewRole::Weapons)
+            .then(|| sim.weapons_measurements()),
     }
 }
 
@@ -369,6 +412,150 @@ mod tests {
         assert!(sonar.tactical.is_none());
         assert!(captain.sonar.is_none());
         assert!(captain.tactical.is_some());
+        assert!(captain.weapons.is_some());
+        assert!(pilot.weapons.is_none());
+        assert!(engineer.weapons.is_none());
+        assert!(sonar.weapons.is_none());
+    }
+
+    #[test]
+    fn weapons_procedure_and_captain_authorization_have_distinct_permissions() {
+        let settings = shared::ShotSettings::for_target(shared::TrackId(1));
+        for command in [
+            PlayerCommand::LoadTube(0),
+            PlayerCommand::ConfigureShot { tube: 0, settings },
+            PlayerCommand::FloodTube(0),
+            PlayerCommand::OpenTube(0),
+            PlayerCommand::FireTorpedo { tube: 0 },
+            PlayerCommand::CloseTube(0),
+            PlayerCommand::PurgeTube(0),
+        ] {
+            for role in CrewRole::ALL {
+                assert_eq!(
+                    command_allowed_for_role(role, &command),
+                    role == CrewRole::Weapons
+                );
+            }
+        }
+        for command in [
+            PlayerCommand::AuthorizeShot { tube: 0, settings },
+            PlayerCommand::OrderWeaponsBot {
+                target: settings.target,
+            },
+        ] {
+            for role in CrewRole::ALL {
+                assert_eq!(
+                    command_allowed_for_role(role, &command),
+                    role == CrewRole::Captain
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn weapons_bot_order_cannot_override_a_human() {
+        let (tx, mut rx) = mpsc::channel(2);
+        let players = HashMap::from([(PlayerId(1), (CrewRole::Captain, tx))]);
+        let humans = HashSet::from([CrewRole::Captain, CrewRole::Weapons]);
+        let mut sim = Simulation::new();
+        handle_command(
+            &mut sim,
+            &players,
+            &humans,
+            request(
+                CrewRole::Captain,
+                GameRoomAction::Player(PlayerCommand::OrderWeaponsBot {
+                    target: shared::TrackId(1),
+                }),
+            ),
+        );
+        assert_eq!(sim.weapons_measurements().reserve, 5);
+        assert!(matches!(
+            rx.try_recv().unwrap().payload,
+            ServerPayload::Error {
+                command_id: Some(CommandId(7)),
+                error: ProtocolError::WeaponsControlledByHuman
+            }
+        ));
+    }
+
+    #[test]
+    fn accepted_commands_are_acknowledged_only_to_the_sender() {
+        let (tx, mut rx) = mpsc::channel(2);
+        let (other_tx, mut other_rx) = mpsc::channel(2);
+        let players = HashMap::from([
+            (PlayerId(1), (CrewRole::Weapons, tx)),
+            (PlayerId(2), (CrewRole::Captain, other_tx)),
+        ]);
+        let mut sim = Simulation::new();
+        handle_command(
+            &mut sim,
+            &players,
+            &HashSet::from([CrewRole::Weapons]),
+            request(
+                CrewRole::Weapons,
+                GameRoomAction::Player(PlayerCommand::LoadTube(0)),
+            ),
+        );
+        assert!(matches!(
+            rx.try_recv().unwrap().payload,
+            ServerPayload::CommandAccepted {
+                command_id: CommandId(7)
+            }
+        ));
+        assert!(other_rx.try_recv().is_err());
+        assert_eq!(sim.weapons_measurements().reserve, 4);
+    }
+
+    #[test]
+    fn torpedo_observations_are_filtered_and_forbidden_commands_do_not_mutate_state() {
+        let mut players = HashMap::new();
+        let mut receivers = vec![];
+        for (index, role) in CrewRole::ALL.into_iter().enumerate() {
+            let (tx, rx) = mpsc::channel(4);
+            players.insert(PlayerId(index as u64 + 1), (role, tx));
+            receivers.push((role, rx));
+        }
+        broadcast(
+            &players,
+            ServerPayload::Event {
+                tick: 1,
+                event: shared::GameEvent::TorpedoImpact { torpedo_id: 1 },
+            },
+        );
+        for (role, rx) in &mut receivers {
+            assert_eq!(
+                rx.try_recv().is_ok(),
+                matches!(
+                    role,
+                    CrewRole::Captain | CrewRole::Weapons | CrewRole::Sonar
+                )
+            );
+        }
+        let mut sim = Simulation::new();
+        handle_command(
+            &mut sim,
+            &players,
+            &HashSet::new(),
+            request(
+                CrewRole::Captain,
+                GameRoomAction::Player(PlayerCommand::LoadTube(0)),
+            ),
+        );
+        assert_eq!(sim.weapons_measurements().reserve, 5);
+        for (role, rx) in &mut receivers {
+            if *role == CrewRole::Captain {
+                assert!(matches!(
+                    rx.try_recv().unwrap().payload,
+                    ServerPayload::Error {
+                        command_id: Some(CommandId(7)),
+                        error: ProtocolError::CommandNotAllowedForRole
+                    }
+                ));
+            } else {
+                assert!(rx.try_recv().is_err());
+            }
+        }
     }
 
     #[test]

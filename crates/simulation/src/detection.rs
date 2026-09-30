@@ -56,6 +56,9 @@ fn observe(
 ) -> Vec<DetectionSample> {
     let mut observations = Vec::new();
     for (index, vessel) in world.vessels.iter().enumerate() {
+        if !vessel.afloat() {
+            continue;
+        }
         let dx = vessel.x - submarine.x;
         let dy = vessel.y - submarine.y;
         let distance = dx.hypot(dy);
