@@ -41,12 +41,15 @@ La carte est schématique : se fier aux valeurs textuelles pour les distances, p
 | `TUBE 4 AV` | Tube numéro 4, dirigé vers l'avant. Les tubes 1 à 4 sont avant ; le tube 5 est arrière. |
 | `Charge / 0s` | Une torpille est chargée et le chargement est terminé. Le tube n'est pas forcément configuré, inondé ou ouvert. |
 | `Reserve 1` | Il reste une torpille non affectée à un tube. Les torpilles en cours de chargement sont déjà retirées de la réserve. |
-| `mer 0` | Aucune course de torpille propre n'est actuellement suivie. |
+| `courses suivies 0` | Aucune course de torpille propre n'est actuellement suivie. |
 | `autorisation NON` | Le Capitaine n'a pas autorisé cette configuration, ou l'autorisation a été annulée. |
-| `Config. piste None / prof. 0m` | Aucune configuration de tir n'a été acceptée pour ce tube. Le `0m` est ici une valeur d'affichage par défaut. |
-| `Config. piste Some(7) / prof. 4m` | Le tube est configuré pour la piste 7, avec une profondeur de torpille de 4 m. |
+| `SELECTION : P48` | Piste choisie localement ; elle n'est pas automatiquement appliquée au tube. |
+| `CONFIGURATION APPLIQUEE : aucune cible` | Aucune configuration de tir n'a été acceptée pour ce tube. |
+| `CONFIGURATION APPLIQUEE : P7 / torpille 4m / correction cap +0 deg / vit. +0 kn` | Le tube est configuré pour la piste 7, à 4 m, sans correction manuelle des estimations. |
 
-Le stock initial comprend **cinq torpilles au total**, et non cinq torpilles par tube. Par exemple, `Reserve 1 / mer 0` peut simplement signifier que quatre torpilles sont déjà affectées à des tubes, sans aucun lancement.
+Le stock initial comprend **cinq torpilles au total**, et non cinq torpilles par tube. Par exemple, `Reserve 1 / courses suivies 0` peut simplement signifier que quatre torpilles sont déjà affectées à des tubes, sans aucun lancement.
+
+Les messages `SELECTION NON APPLIQUEE` et `REGLAGES NON APPLIQUES` signalent un écart entre votre choix local et le tube. Dans ce cas, le tir est suspendu : utiliser **Configurer** pour appliquer le changement, ou revenir aux réglages déjà appliqués. Sélectionner à nouveau le tube recharge ses réglages appliqués lorsqu'il est configuré. Une nouvelle configuration impose une nouvelle autorisation.
 
 ## 4. Procédure complète au poste Armement
 
@@ -67,7 +70,7 @@ Si le tube est déjà chargé, passer directement aux réglages.
 
 ### Étape 3 — Régler et configurer
 
-Le bouton qui affiche **Prof. … m** fait défiler trois réglages. Les boutons moins et plus modifient le réglage affiché :
+Le bouton qui affiche **Prof. torpille … m** fait défiler trois réglages. Les boutons moins et plus modifient le réglage affiché :
 
 | Réglage | Effet des boutons | Effet sur le tir |
 |---|---|---|
@@ -79,7 +82,7 @@ Exemple : une piste estimée à 40 nœuds avec une correction de vitesse de −1
 
 Appuyer sur **Configurer** pour envoyer la piste sélectionnée et les réglages au tube. Les modifications locales ne sont pas appliquées avant cet envoi.
 
-Vérifier ensuite que `Config. piste` affiche un numéro et qu'une solution apparaît. Si la configuration est refusée, le tube conserve sa configuration précédente, ou reste sans configuration.
+Vérifier ensuite que `CONFIGURATION APPLIQUEE` affiche la piste voulue et qu'une solution apparaît. Si la configuration est refusée, le tube conserve sa configuration précédente, ou reste sans configuration.
 
 ### Étape 4 — Préparer le tube
 
@@ -128,15 +131,25 @@ Si un humain occupe l'Armement, **Ordre bot** est refusé : transmettre la cible
 
 | Message ou symptôme | Ce qu'il faut vérifier |
 |---|---|
-| `Solution indisponible : configurer une piste suivie` | Le tube n'a pas de configuration acceptée, ou la piste ne permet plus de calculer une solution. |
-| `INTERCEPTION IMPOSSIBLE / SECTEUR DU TUBE` | Message générique : estimations incomplètes, interception impossible, autonomie insuffisante ou tir hors secteur. Vérifier d'abord la piste et sa vitesse, puis le positionnement du bâtiment. |
+| `Le tube … vise P…, piste perdue ou non partagee` | Choisir une piste encore partagée puis **Configurer**. Si vous êtes Capitaine, demander la reconfiguration à l'Armement ou donner un nouvel **Ordre bot**. |
+| `SELECTION NON APPLIQUEE` | Le tube vise toujours une autre piste. **Configurer** applique le nouveau choix. |
+| `REGLAGES NON APPLIQUES` | Les corrections locales diffèrent de celles du tube. Appliquer ou rétablir les réglages avant le tir. |
+| `Distance cible inconnue`, `Cap cible inconnu`, `Vitesse cible inconnue` | Attendre que les observations du Sonar permettent d'estimer la donnée manquante. |
+| `Vitesse cible corrigee egale a celle de la torpille` | Limitation actuelle du calcul : attendre une nouvelle estimation ou ajuster la correction de vitesse puis **Configurer**. |
+| `Aucune interception avec ces estimations` | Attendre de nouvelles observations ou corriger les réglages. |
+| `Interception au-dela de l'autonomie` | Rapprocher le sous-marin ou choisir une autre piste. |
+| `Direction du tir hors secteur` | Faire manœuvrer le Pilote ou utiliser un tube avant/arrière adapté à la direction du tir. |
+| `EN COURS` | Une opération temporisée est en cours. Le message indique le temps restant ; attendre avant la suite. |
+| `AUTORISATION MANQUANTE` | Le Capitaine doit autoriser la configuration du tube. |
 | `PROCEDURE : ETAPE DU TUBE INCOMPATIBLE` | Une étape manque ou une opération est encore en cours. Attendre le statut final avant de poursuivre. |
 | `ATTENDRE L'AUTORISATION DU CAPITAINE` | Obtenir une autorisation sur la configuration actuelle du tube. |
 | `PISTE EXPIREE OU NON PARTAGEE` | Demander au Sonar une piste encore présente et partagée, puis reconfigurer le tube. |
 | `RESERVE VIDE` | Vérifier les autres tubes : des torpilles peuvent y être déjà chargées. |
 | Bouton sombre | L'action paraît indisponible dans l'état actuel. L'interface ne détaille pas encore systématiquement la raison près du bouton. |
 
-### Cas de la capture : tube chargé, piste à 40 nœuds
+### Cas d'une ancienne capture : tube chargé, piste à 40 nœuds
+
+Les premières captures utilisaient les libellés `Config. piste None` / `Some(…)` et un message générique d'interception. Ils ont été remplacés par les états explicites ci-dessus.
 
 Sur l'exemple `P6 7 deg / 3878m / conf. 69%`, `Cible cap 104 / 40.0 kn`, `TUBE 4 AV / Charge`, `Config. piste None` :
 
@@ -147,11 +160,11 @@ Sur l'exemple `P6 7 deg / 3878m / conf. 69%`, `Cible cap 104 / 40.0 kn`, `TUBE 4
 
 Pour poursuivre : sélectionner par exemple une piste `Merchant` partagée, vérifier ses estimations, conserver une profondeur de torpille de 4 m et tenter **Configurer**. Si l'estimation de vitesse reste à 40 nœuds, attendre d'autres observations ou essayer une correction manuelle de vitesse avant de reconfigurer. Une fois la configuration acceptée : **Inonder → Ouvrir → autorisation → Tirer… → CONFIRMER TIR**.
 
-Un message d'erreur affiché peut aussi correspondre à une commande précédente ; il est effacé à la prochaine commande acceptée. Les états `Config. piste`, tube et solution permettent de vérifier le résultat effectif.
+`Derniere commande refusee` décrit un ancien résultat de commande, pas nécessairement le blocage actuel. Il est effacé à la prochaine commande acceptée. `Derniere action locale` décrit votre dernier appui ; ce n'est pas une confirmation serveur. Les messages de blocage et de prochaine étape sont calculés depuis le snapshot courant. `CONFIGURATION APPLIQUEE`, l'état du tube et la solution permettent de vérifier le résultat effectif.
 
 ## 7. Savoir si le tir a touché
 
-- `mer` compte les courses propres suivies, pas les ennemis touchés.
+- `courses suivies` compte les courses propres suivies, pas les ennemis touchés.
 - Une **explosion observée** signale un impact entendu à portée d'écoute (6 km dans cette version). Elle ne confirme ni l'identité ni l'intégrité restante d'une cible.
 - Une **fin de course** correspond à l'épuisement estimé de l'autonomie. Ce n'est pas une preuve absolue que le tir a manqué : un impact hors portée d'écoute reste caché et sa course estimée continue jusqu'à son terme.
 - La trajectoire peut passer trop loin, devenir fausse après une manœuvre adverse, ou passer sous une coque si la profondeur réglée dépasse 8 m.

@@ -43,16 +43,29 @@ impl Weapons {
         tracks: &[TrackEstimate],
         config: WeaponsConfig,
     ) -> WeaponsMeasurements {
+        let results: Vec<_> = self
+            .tubes
+            .iter()
+            .map(|tube| {
+                tube.settings
+                    .map(|settings| solution(state, tracks, settings, config))
+            })
+            .collect();
         WeaponsMeasurements {
             tubes: self.tubes.clone(),
             reserve: self.reserve,
-            solutions: self
-                .tubes
+            solution_errors: results
+                .iter()
+                .map(|result| result.as_ref().and_then(|r| r.as_ref().err().cloned()))
+                .collect(),
+            solutions: results
                 .iter()
                 .enumerate()
-                .map(|(index, tube)| {
-                    tube.settings
-                        .and_then(|settings| solution(state, tracks, settings, config).ok())
+                .map(|(index, result)| {
+                    result
+                        .as_ref()
+                        .and_then(|r| r.as_ref().ok())
+                        .cloned()
                         .map(|mut shot| {
                             let axis = (state.heading + if index == 4 { 180.0 } else { 0.0 })
                                 .rem_euclid(360.0);
@@ -158,7 +171,7 @@ impl Weapons {
                 // Tubes avant et arrière : le bâtiment doit être positionné pour le tir.
                 let axis = (state.heading + if index == 4 { 180.0 } else { 0.0 }).rem_euclid(360.0);
                 if crate::shortest_angle(axis, shot.bearing).abs() > 90.0 {
-                    return Err(ProtocolError::NoFiringSolution);
+                    return Err(ProtocolError::TargetOutsideTubeSector);
                 }
                 self.next_id += 1;
                 self.torpedoes.push(RunningTorpedo {
@@ -330,11 +343,11 @@ pub(crate) fn solution(
     if !track.shared {
         return Err(ProtocolError::TrackNotShared);
     }
-    let distance = track.distance.ok_or(ProtocolError::NoFiringSolution)?;
-    let heading = (track.heading.ok_or(ProtocolError::NoFiringSolution)?
+    let distance = track.distance.ok_or(ProtocolError::MissingTargetDistance)?;
+    let heading = (track.heading.ok_or(ProtocolError::MissingTargetHeading)?
         + settings.heading_correction)
         .to_radians();
-    let speed = (track.speed.ok_or(ProtocolError::NoFiringSolution)? + settings.speed_correction)
+    let speed = (track.speed.ok_or(ProtocolError::MissingTargetSpeed)? + settings.speed_correction)
         .max(0.0)
         * KNOTS_TO_METERS_PER_SECOND;
     let angle = track.bearing.to_radians();
@@ -345,7 +358,10 @@ pub(crate) fn solution(
     let b = 2.0 * (rx * vx + ry * vy);
     let c = rx * rx + ry * ry;
     let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 || a.abs() < 0.0001 {
+    if a.abs() < 0.0001 {
+        return Err(ProtocolError::EqualTargetAndTorpedoSpeed);
+    }
+    if discriminant < 0.0 {
         return Err(ProtocolError::NoFiringSolution);
     }
     let roots = [
@@ -358,7 +374,7 @@ pub(crate) fn solution(
         .reduce(f32::min)
         .ok_or(ProtocolError::NoFiringSolution)?;
     if time * ts > config.torpedo_range_meters {
-        return Err(ProtocolError::NoFiringSolution);
+        return Err(ProtocolError::InterceptOutOfRange);
     }
     let bearing = (rx + vx * time)
         .atan2(ry + vy * time)
@@ -687,6 +703,84 @@ mod tests {
     #[test]
     fn attack_replay_is_deterministic() {
         assert_eq!(attack(false, 0.0), attack(false, 0.0));
+    }
+
+    #[test]
+    fn solution_failures_distinguish_missing_motion_equal_speed_range_and_lost_track() {
+        let (weapons, _, state, config, tracks) = ready();
+        let settings = weapons.tubes[0].settings.unwrap();
+        for (missing, expected) in [
+            (0, ProtocolError::MissingTargetDistance),
+            (1, ProtocolError::MissingTargetHeading),
+            (2, ProtocolError::MissingTargetSpeed),
+        ] {
+            let mut estimate = tracks[0].clone();
+            match missing {
+                0 => estimate.distance = None,
+                1 => estimate.heading = None,
+                _ => estimate.speed = None,
+            }
+            assert_eq!(
+                solution(&state, &[estimate.clone()], settings, config),
+                Err(expected.clone())
+            );
+            assert_eq!(
+                weapons
+                    .measurements(&state, &[estimate], config)
+                    .solution_errors[0],
+                Some(expected)
+            );
+        }
+        let mut fast = tracks[0].clone();
+        fast.speed = Some(config.torpedo_speed_knots);
+        assert_eq!(
+            solution(&state, &[fast], settings, config),
+            Err(ProtocolError::EqualTargetAndTorpedoSpeed)
+        );
+        let short_range = WeaponsConfig {
+            torpedo_range_meters: 100.0,
+            ..config
+        };
+        assert_eq!(
+            solution(&state, &tracks, settings, short_range),
+            Err(ProtocolError::InterceptOutOfRange)
+        );
+        let lost = weapons.measurements(&state, &[], config);
+        assert_eq!(lost.solution_errors[0], Some(ProtocolError::TrackNotShared));
+        assert!(lost.solutions[0].is_none());
+        assert_eq!(lost.tubes[0].settings.unwrap().target, settings.target);
+        let encoded = shared::codec::encode(&lost);
+        assert_eq!(
+            shared::codec::decode::<WeaponsMeasurements>(&encoded).unwrap(),
+            lost
+        );
+    }
+
+    #[test]
+    fn a_valid_solution_outside_the_tube_sector_is_distinct_from_no_interception() {
+        let (mut weapons, _, mut state, config, tracks) = ready();
+        state.heading = 180.0;
+        let settings = weapons.tubes[0].settings.unwrap();
+        weapons
+            .apply(
+                PlayerCommand::AuthorizeShot { tube: 0, settings },
+                &state,
+                &tracks,
+                config,
+            )
+            .unwrap();
+        let projection = weapons.measurements(&state, &tracks, config);
+        assert!(projection.solution_errors[0].is_none());
+        assert!(!projection.solutions[0].as_ref().unwrap().launch_allowed);
+        assert_eq!(
+            weapons.apply(
+                PlayerCommand::FireTorpedo { tube: 0 },
+                &state,
+                &tracks,
+                config
+            ),
+            Err(ProtocolError::TargetOutsideTubeSector)
+        );
     }
 
     #[test]

@@ -136,7 +136,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `4`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 4 remplace directement la version 3 : commandes explicites d'armement, configuration des torpilles, autorisation du Capitaine, projections des tubes et courses estimées, et accusés de réception par commande.
+Chaque enveloppe porte `version: u16` (actuellement `5`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 4 a introduit les commandes explicites d'armement, la configuration des torpilles, l'autorisation du Capitaine, les projections des tubes et les accusés de réception. La version 5 remplace la version 4 et ajoute les causes structurées d'échec des solutions de tir, transmises uniquement aux postes autorisés. Serveur et client doivent être mis à jour ensemble.
 
 ### Client → Serveur (`ClientPayload`)
 
@@ -191,7 +191,7 @@ make build-wasm
 - [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v4 avec fixtures `postcard`, projections par rôle, accusés et ticks numérotés
+- [x] Protocole v5 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, accusés et ticks numérotés
 - [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
 - [x] Convoi, observations, pistes incertaines et poste Sonar tactile (M3)
 - [x] Tubes, solution de tir, autorisation, torpilles et impacts simulés (M4)

@@ -391,6 +391,7 @@ pub struct WeaponsMeasurements {
     pub tubes: Vec<TubeMeasurements>,
     pub reserve: u8,
     pub solutions: Vec<Option<FiringSolution>>,
+    pub solution_errors: Vec<Option<crate::ProtocolError>>,
     pub torpedoes: Vec<TorpedoMeasurements>,
 }
 

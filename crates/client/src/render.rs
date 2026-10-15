@@ -2479,10 +2479,16 @@ pub(crate) fn error_label(error: &ProtocolError) -> String {
         ProtocolError::NoTorpedoes => "RESERVE VIDE".into(),
         ProtocolError::InvalidShotSettings => "REGLAGES DE TIR INVALIDES".into(),
         ProtocolError::TrackNotShared => "PISTE EXPIREE OU NON PARTAGEE".into(),
-        ProtocolError::NoFiringSolution => "INTERCEPTION IMPOSSIBLE / SECTEUR DU TUBE".into(),
+        ProtocolError::NoFiringSolution => "Aucune interception avec ces estimations : attendre de nouvelles observations ou corriger les reglages.".into(),
         ProtocolError::ShotNotAuthorized => "ATTENDRE L'AUTORISATION DU CAPITAINE".into(),
         ProtocolError::LaunchDepthExceeded => "REMONTER A 20 M OU MOINS POUR TIRER".into(),
         ProtocolError::WeaponsControlledByHuman => "LE POSTE ARMEMENT EST HUMAIN".into(),
+        ProtocolError::MissingTargetDistance => "Distance cible inconnue : attendre les observations du Sonar.".into(),
+        ProtocolError::MissingTargetHeading => "Cap cible inconnu : attendre que le Sonar estime sa route.".into(),
+        ProtocolError::MissingTargetSpeed => "Vitesse cible inconnue : attendre que le Sonar estime sa vitesse.".into(),
+        ProtocolError::EqualTargetAndTorpedoSpeed => "Vitesse cible corrigee egale a celle de la torpille : cas non gere par le calcul actuel. Attendre une nouvelle estimation ou ajuster Vit. cible, puis Configurer.".into(),
+        ProtocolError::InterceptOutOfRange => "Interception au-dela de l'autonomie de la torpille : rapprocher le sous-marin ou choisir une autre piste.".into(),
+        ProtocolError::TargetOutsideTubeSector => "Direction du tir hors secteur : faire manoeuvrer le Pilote ou choisir un tube de l'autre orientation (avant/arriere).".into(),
     }
 }
 

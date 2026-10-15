@@ -39,5 +39,6 @@
 - `Simulation::tick` applies inertial nautical movement and advances torpedoes with collision events. Submarine collisions and buoyancy are not implemented yet.
 - Sonar M3 and weapons M4 are implemented. `simulation/src/weapons.rs` owns timed tubes, shared-track interception, authorizations and torpedoes; `world.rs` owns private vessel integrity and impact reactions. Protocol v4 adds explicit weapons commands and command acknowledgments. Repair still emits an event without mutating system state; escort search/attack remains M5.
 - Weapons measurements go only to Captain/Weapons. Observed torpedo explosions and estimated run ends go only to Captain/Weapons/Sonar. An unheard impact must not remove a torpedo from its projected estimated run or expose enemy identity, position or integrity.
+- Current protocol is v5: `WeaponsMeasurements::solution_errors` carries per-tube failure causes derived only from shared estimates. Keep selection/local edits distinct from applied tube settings in the client; pending local changes suspend the fire confirmation until applied or reverted.
 - The README calls the client a PWA, but there is no manifest or service worker yet. The hard-coded localhost WebSocket also prevents normal use from a remote phone.
 - There is no CI, formatter/linter config, Dockerfile, or deployment config; do not infer those workflows from the roadmap.

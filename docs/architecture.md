@@ -115,7 +115,7 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation et recharge | distribution détaillée, compartiments, avaries et réparations temporisées |
 | IA | bots Pilote/Ingénierie minimaux, partage du bot Sonar, préparation Armement sur ordre et autorisation Capitaine | bots de poste complets et comportement tactique ennemi |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
-| Protocole | version 4, identifiants opaques, projections par rôle et accusés de commandes | reprise et négociation de compatibilité |
+| Protocole | version 5, identifiants opaques, projections par rôle, diagnostics d'armement et accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -166,6 +166,8 @@ C4Container
 **Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil, convoi déterministe, détection passive/active, pistes incertaines et automatisation minimale des bots Ingénierie et Sonar. `weapons.rs` possède les tubes, autorisations, solutions calculées exclusivement depuis les estimations partagées et courses de torpilles. `world.rs` applique les collisions, l'intégrité et les manœuvres privées du convoi. `WeaponsConfig` centralise les paramètres d'équilibrage transmis avec la mission.
 
 Les mesures d'armement sont projetées uniquement vers le Capitaine et l'Armement. Les événements d'explosion observée et de fin de course estimée sont limités au Capitaine, à l'Armement et au Sonar. Une collision hors portée d'écoute ne raccourcit pas la course estimée envoyée au client : son résultat réel ne traverse pas la frontière réseau. L'intégrité, l'identité et la position réelle des navires restent dans le monde privé.
+
+Le protocole v5 ajoute `WeaponsMeasurements::solution_errors`, aligné sur les tubes et les solutions. La simulation distingue les données de piste manquantes, une piste perdue/non partagée, le cas de vitesses égales non géré, l'absence d'interception et l'autonomie insuffisante. Une solution calculable hors secteur conserve sa direction et ses avertissements, mais interdit le lancement ; un tir hors secteur reçoit une erreur distincte. Ces diagnostics n'utilisent que la piste partagée et la configuration du tir, sans information ennemie cachée. Le client distingue sélection locale, configuration appliquée, état courant et résultat de la dernière commande.
 
 **Composants cibles :**
 
