@@ -97,7 +97,7 @@ impl World {
         depth: f32,
         config: shared::WeaponsConfig,
     ) -> Option<bool> {
-        if depth > 8.0 {
+        if depth > config.max_surface_impact_depth {
             return None;
         }
         let dx = bx - ax;

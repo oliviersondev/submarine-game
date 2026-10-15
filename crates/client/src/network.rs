@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::VecDeque;
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use shared::{
     codec::{decode, encode},
@@ -171,7 +172,8 @@ pub struct GameState {
     pub server_tick: u64,
     pub game_started: bool,
     pub last_error: Option<ProtocolError>,
-    pub latest_event: Option<GameEvent>,
+    /// Historique borne, conserve tous les evenements d'un meme lot reseau.
+    pub events: VecDeque<(u64, GameEvent)>,
 }
 
 pub struct NetworkPlugin;
@@ -444,7 +446,9 @@ fn handle_server_message(
         ServerPayload::Event { tick, event } => {
             state.server_tick = state.server_tick.max(tick);
             debug!("GameEvent: {event:?}");
-            state.latest_event = Some(event);
+            const EVENT_HISTORY_CAPACITY: usize = 64;
+            if state.events.len() == EVENT_HISTORY_CAPACITY { state.events.pop_front(); }
+            state.events.push_back((tick, event));
         }
         ServerPayload::Error { error, .. } => {
             commands.clear_intents();

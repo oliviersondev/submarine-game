@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{BallastState, CrewRole, MissionSnapshot, SubmarineConfig, SystemId, TrackId};
 
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -121,9 +121,10 @@ pub enum ProtocolError {
     MissingTargetDistance,
     MissingTargetHeading,
     MissingTargetSpeed,
-    EqualTargetAndTorpedoSpeed,
     InterceptOutOfRange,
     TargetOutsideTubeSector,
+    AuthorizationSettingsMismatch,
+    TorpedoDepthExceedsImpactZone { maximum_meters: f32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -272,32 +273,32 @@ mod tests {
     }
 
     #[test]
-    fn version_five_fixtures_detect_enum_reordering() {
+    fn version_six_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![5, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![5, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[5, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[5, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![6, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![6, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[6, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[6, 0, 2, 1]).unwrap(), ready);
     }
 
     #[test]
-    fn version_five_m2_command_fixture_is_stable() {
+    fn version_six_m2_command_fixture_is_stable() {
         let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::SetBallast(BallastState::Flood),
         }));
-        let fixture = vec![5, 1, 0, 9, 3, 0];
+        let fixture = vec![6, 1, 0, 9, 3, 0];
         assert_eq!(encode(&message), fixture);
         assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
     }
 
     #[test]
-    fn version_five_weapons_and_acknowledgment_fixtures_are_stable() {
+    fn version_six_weapons_and_acknowledgment_fixtures_are_stable() {
         let load = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::LoadTube(0),
@@ -307,8 +308,8 @@ mod tests {
             command: PlayerCommand::FireTorpedo { tube: 0 },
         }));
         for (message, fixture) in [
-            (load, vec![5, 1, 0, 9, 15, 0]),
-            (fire, vec![5, 1, 0, 9, 9, 0]),
+            (load, vec![6, 1, 0, 9, 15, 0]),
+            (fire, vec![6, 1, 0, 9, 9, 0]),
         ] {
             assert_eq!(encode(&message), fixture);
             assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
@@ -316,8 +317,8 @@ mod tests {
         let ack = ServerMessage::new(ServerPayload::CommandAccepted {
             command_id: CommandId(9),
         });
-        assert_eq!(encode(&ack), vec![5, 0, 9]);
-        assert_eq!(decode::<ServerMessage>(&[5, 0, 9]).unwrap(), ack);
+        assert_eq!(encode(&ack), vec![6, 0, 9]);
+        assert_eq!(decode::<ServerMessage>(&[6, 0, 9]).unwrap(), ack);
         let configured = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(10),
             command: PlayerCommand::ConfigureShot {
@@ -332,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn version_five_mission_snapshot_round_trips() {
+    fn version_six_mission_snapshot_round_trips() {
         let message = ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id: 3,
             tick: 7,

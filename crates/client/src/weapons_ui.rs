@@ -115,11 +115,14 @@ fn buttons(
         if !matches!(action, Action::Fire) {
             ui.confirmation = None;
         }
-        let tube = &weapons.tubes[ui.tube];
+        let Some(tube) = weapons.tubes.get(ui.tube) else {
+            ui.notice = "Tube indisponible : attendre la synchronisation de l'armement.".into();
+            continue;
+        };
         match action {
             Action::Tube => {
                 ui.tube = (ui.tube + 1) % weapons.tubes.len();
-                if let Some(settings) = weapons.tubes[ui.tube].settings {
+                if let Some(settings) = weapons.tubes.get(ui.tube).and_then(|tube| tube.settings) {
                     ui.target = Some(settings.target);
                     ui.depth = settings.depth;
                     ui.heading = settings.heading_correction;
@@ -220,8 +223,7 @@ fn buttons(
                 if tube.phase != TubePhase::Ready
                     || !tube.authorized
                     || pending_configuration(&ui, tube.settings)
-                    || !weapons.solutions[ui.tube]
-                        .as_ref()
+                    || !weapons.solutions.get(ui.tube).and_then(|s| s.as_ref())
                         .is_some_and(|s| s.launch_allowed)
                 {
                     ui.notice = tube_guidance(weapons, &tactical.shared_tracks, &ui, false);
@@ -255,7 +257,15 @@ fn update(
     let Some(weapons) = &state.weapons else {
         return;
     };
-    let tube = &weapons.tubes[ui.tube];
+    if weapons.tubes.is_empty() {
+        ui.confirmation = None;
+        for mut text in &mut status { **text = "Armement indisponible : aucun tube recu. Attendre la synchronisation.".into(); }
+        for (_, mut color) in &mut actions { *color = BackgroundColor(Color::srgb(0.045, 0.065, 0.075)); }
+        return;
+    }
+    if ui.tube >= weapons.tubes.len() { ui.tube = 0; ui.confirmation = None; }
+    let Some(tube) = weapons.tubes.get(ui.tube) else { return; };
+    let current_solution = weapons.solutions.get(ui.tube).and_then(|s| s.as_ref());
     let tracks = state
         .tactical
         .as_ref()
@@ -274,14 +284,12 @@ fn update(
             || !tube.authorized
             || tube.phase != TubePhase::Ready
             || pending_configuration(&ui, tube.settings)
-            || !weapons.solutions[ui.tube]
-                .as_ref()
+            || !current_solution
                 .is_some_and(|s| s.launch_allowed)
     }) {
         ui.confirmation = None;
     }
-    let solution = weapons.solutions[ui.tube]
-        .as_ref()
+    let solution = current_solution
         .map(|s| {
             format!(
                 "Tir {:.0} deg / {:.0}s / +/- {:.0}m\n{}",
@@ -311,21 +319,19 @@ fn update(
                 format!("Derniere commande acceptee : #{}.", id.0)
             })
         });
-    let event = match &state.latest_event {
-        Some(shared::GameEvent::TorpedoImpact { torpedo_id }) => {
-            format!("Explosion observee / torpille {}", torpedo_id)
+    let events = state.events.iter().rev().filter_map(|(tick, event)| match event {
+        shared::GameEvent::TorpedoImpact { torpedo_id } => {
+            Some(format!("[tick {}] Explosion observee / torpille {}", tick, torpedo_id))
         }
-        Some(shared::GameEvent::TorpedoExpired { torpedo_id }) => {
-            format!(
-                "Fin de course estimee / torpille {} (impact non confirme)",
-                torpedo_id
-            )
+        shared::GameEvent::TorpedoExpired { torpedo_id } => {
+            Some(format!("[tick {}] Fin de course estimee / torpille {} (impact non confirme)", tick, torpedo_id))
         }
-        Some(shared::GameEvent::TorpedoFired { bearing }) => {
-            format!("Torpille lancee / {:.0} deg", bearing)
+        shared::GameEvent::TorpedoFired { bearing } => {
+            Some(format!("[tick {}] Torpille lancee / {:.0} deg", tick, bearing))
         }
-        _ => String::new(),
-    };
+        _ => None,
+    }).take(6).collect::<Vec<_>>();
+    let event = events.into_iter().rev().collect::<Vec<_>>().join("\n");
     let selected = tracks
         .iter()
         .find(|t| Some(t.id) == ui.target)
@@ -416,7 +422,7 @@ fn update(
                     )
             }
             Action::Prepare if captain => {
-                tube.settings.is_some() && weapons.solutions[ui.tube].is_some()
+                tube.settings.is_some() && current_solution.is_some()
             }
             Action::Prepare => {
                 matches!(tube.phase, TubePhase::Empty | TubePhase::Flooded)
@@ -427,8 +433,7 @@ fn update(
                     && !pending_configuration(&ui, tube.settings)
                     && tube.phase == TubePhase::Ready
                     && tube.authorized
-                    && weapons.solutions[ui.tube]
-                        .as_ref()
+                    && current_solution
                         .is_some_and(|s| s.launch_allowed)
             }
             Action::Cancel => {
@@ -458,7 +463,10 @@ fn tube_guidance(
     ui: &WeaponUi,
     captain: bool,
 ) -> String {
-    let tube = &weapons.tubes[ui.tube];
+    let Some(tube) = weapons.tubes.get(ui.tube) else {
+        return "Tube indisponible : attendre la synchronisation de l'armement.".into();
+    };
+    let current_solution = weapons.solutions.get(ui.tube).and_then(|s| s.as_ref());
     let mut messages = Vec::new();
     if let Some(settings) = tube.settings {
         if !tracks.iter().any(|track| track.id == settings.target) {
@@ -505,8 +513,8 @@ fn tube_guidance(
         TubePhase::Loaded => "PROCHAINE ETAPE : Inonder (8s), puis Ouvrir (3s).".into(),
         TubePhase::Flooded if tube.settings.is_none() => "PROCHAINE ETAPE : Purger avant de recharger.".into(),
         TubePhase::Flooded => "PROCHAINE ETAPE : Ouvrir pour poursuivre, ou Fermer / purger pour annuler la preparation.".into(),
-        TubePhase::Ready if weapons.solutions[ui.tube].is_none() => "Tube ouvert, mais aucune solution valide : resoudre le blocage indique ci-dessus, puis Configurer si necessaire.".into(),
-        TubePhase::Ready if !weapons.solutions[ui.tube].as_ref().is_some_and(|s| s.launch_allowed) => "TIR BLOQUE PAR LE POSITIONNEMENT : consulter les avertissements de la solution et demander une manoeuvre au Pilote.".into(),
+        TubePhase::Ready if current_solution.is_none() => "Tube ouvert, mais aucune solution valide : resoudre le blocage indique ci-dessus, puis Configurer si necessaire.".into(),
+        TubePhase::Ready if !current_solution.is_some_and(|s| s.launch_allowed) => "TIR BLOQUE PAR LE POSITIONNEMENT : consulter les avertissements de la solution et demander une manoeuvre au Pilote.".into(),
         TubePhase::Ready if !tube.authorized && captain => "AUTORISATION MANQUANTE : verifier la configuration appliquee puis appuyer sur Autoriser.".into(),
         TubePhase::Ready if !tube.authorized => "AUTORISATION MANQUANTE : demander au Capitaine d'autoriser ce tube (automatique si le Capitaine est un bot).".into(),
         TubePhase::Ready if captain => "TUBE PRET ET AUTORISE : l'Armement peut declencher le tir ; le bot le fait automatiquement.".into(),

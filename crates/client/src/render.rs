@@ -2486,9 +2486,10 @@ pub(crate) fn error_label(error: &ProtocolError) -> String {
         ProtocolError::MissingTargetDistance => "Distance cible inconnue : attendre les observations du Sonar.".into(),
         ProtocolError::MissingTargetHeading => "Cap cible inconnu : attendre que le Sonar estime sa route.".into(),
         ProtocolError::MissingTargetSpeed => "Vitesse cible inconnue : attendre que le Sonar estime sa vitesse.".into(),
-        ProtocolError::EqualTargetAndTorpedoSpeed => "Vitesse cible corrigee egale a celle de la torpille : cas non gere par le calcul actuel. Attendre une nouvelle estimation ou ajuster Vit. cible, puis Configurer.".into(),
         ProtocolError::InterceptOutOfRange => "Interception au-dela de l'autonomie de la torpille : rapprocher le sous-marin ou choisir une autre piste.".into(),
         ProtocolError::TargetOutsideTubeSector => "Direction du tir hors secteur : faire manoeuvrer le Pilote ou choisir un tube de l'autre orientation (avant/arriere).".into(),
+        ProtocolError::AuthorizationSettingsMismatch => "Autorisation refusee : la configuration du tube a change. Relire la configuration appliquee puis autoriser a nouveau.".into(),
+        ProtocolError::TorpedoDepthExceedsImpactZone { maximum_meters } => format!("Torpille trop profonde pour une cible de surface : regler Prof. torpille a {maximum_meters:.0}m ou moins, puis Configurer."),
     }
 }
 

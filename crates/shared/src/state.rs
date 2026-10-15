@@ -362,6 +362,7 @@ impl ShotSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TubeMeasurements {
     pub phase: TubePhase,
+    pub loaded: bool,
     pub remaining_seconds: f32,
     pub settings: Option<ShotSettings>,
     pub authorized: bool,
@@ -406,6 +407,7 @@ pub struct WeaponsConfig {
     pub damage: f32,
     pub collision_radius_meters: f32,
     pub max_launch_depth: f32,
+    pub max_surface_impact_depth: f32,
 }
 
 impl Default for WeaponsConfig {
@@ -420,6 +422,7 @@ impl Default for WeaponsConfig {
             damage: 100.0,
             collision_radius_meters: 35.0,
             max_launch_depth: 20.0,
+            max_surface_impact_depth: 8.0,
         }
     }
 }

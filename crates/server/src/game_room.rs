@@ -177,7 +177,7 @@ fn broadcast(
     for (role, tx) in players.values() {
         if let ServerPayload::Event {
             event:
-                shared::GameEvent::TorpedoImpact { .. } | shared::GameEvent::TorpedoExpired { .. },
+                shared::GameEvent::TorpedoFired { .. } | shared::GameEvent::TorpedoImpact { .. } | shared::GameEvent::TorpedoExpired { .. },
             ..
         } = &message.payload
         {
