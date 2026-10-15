@@ -42,6 +42,8 @@ Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes a
 
 ### Essayer une attaque M4
 
+Le **[guide joueur Armement](docs/guide-armement.md)** explique les mesures de l'écran, chaque bouton, la procédure complète et les messages de blocage.
+
 1. Créer une salle au poste `Weapons` (`?role=weapons`), se déclarer prêt et démarrer. Le bot Sonar partage ses pistes lorsqu'elles deviennent fiables.
 2. Sélectionner une piste et un tube avant ; **Charger**, attendre 20 s, puis **Configurer**. Le bouton de réglage alterne profondeur de torpille, correction du cap cible et correction de sa vitesse ; `−` et `+` modifient le réglage, puis **Configurer** l'applique.
 3. **Inonder** (8 s), puis **Ouvrir** (3 s). Le bot Capitaine autorise une solution disponible. Un Capitaine humain utilise **Autoriser** sur le tube configuré.
