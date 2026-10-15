@@ -177,7 +177,9 @@ fn broadcast(
     for (role, tx) in players.values() {
         if let ServerPayload::Event {
             event:
-                shared::GameEvent::TorpedoFired { .. } | shared::GameEvent::TorpedoImpact { .. } | shared::GameEvent::TorpedoExpired { .. },
+                shared::GameEvent::TorpedoFired { .. }
+                | shared::GameEvent::TorpedoImpact { .. }
+                | shared::GameEvent::TorpedoExpired { .. },
             ..
         } = &message.payload
         {
@@ -516,21 +518,21 @@ mod tests {
             players.insert(PlayerId(index as u64 + 1), (role, tx));
             receivers.push((role, rx));
         }
-        broadcast(
-            &players,
-            ServerPayload::Event {
-                tick: 1,
-                event: shared::GameEvent::TorpedoImpact { torpedo_id: 1 },
-            },
-        );
-        for (role, rx) in &mut receivers {
-            assert_eq!(
-                rx.try_recv().is_ok(),
-                matches!(
-                    role,
-                    CrewRole::Captain | CrewRole::Weapons | CrewRole::Sonar
-                )
-            );
+        for event in [
+            shared::GameEvent::TorpedoFired { bearing: 5.0 },
+            shared::GameEvent::TorpedoImpact { torpedo_id: 1 },
+            shared::GameEvent::TorpedoExpired { torpedo_id: 2 },
+        ] {
+            broadcast(&players, ServerPayload::Event { tick: 1, event });
+            for (role, rx) in &mut receivers {
+                assert_eq!(
+                    rx.try_recv().is_ok(),
+                    matches!(
+                        role,
+                        CrewRole::Captain | CrewRole::Weapons | CrewRole::Sonar
+                    )
+                );
+            }
         }
         let mut sim = Simulation::new();
         handle_command(

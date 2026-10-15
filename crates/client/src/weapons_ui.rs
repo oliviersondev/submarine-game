@@ -145,7 +145,17 @@ fn buttons(
                     1.0
                 };
                 match ui.field {
-                    0 => ui.depth = (ui.depth + delta).clamp(1.0, 15.0),
+                    0 => {
+                        ui.depth = (ui.depth + delta).clamp(
+                            1.0,
+                            state
+                                .weapons_config
+                                .unwrap_or_default()
+                                .max_surface_impact_depth
+                                .min(15.0)
+                                .max(1.0),
+                        )
+                    }
                     1 => ui.heading = (ui.heading + delta * 5.0).clamp(-45.0, 45.0),
                     _ => ui.speed = (ui.speed + delta).clamp(-10.0, 10.0),
                 }
@@ -221,9 +231,13 @@ fn buttons(
                     continue;
                 };
                 if tube.phase != TubePhase::Ready
+                    || !tube.loaded
                     || !tube.authorized
                     || pending_configuration(&ui, tube.settings)
-                    || !weapons.solutions.get(ui.tube).and_then(|s| s.as_ref())
+                    || !weapons
+                        .solutions
+                        .get(ui.tube)
+                        .and_then(|s| s.as_ref())
                         .is_some_and(|s| s.launch_allowed)
                 {
                     ui.notice = tube_guidance(weapons, &tactical.shared_tracks, &ui, false);
@@ -259,12 +273,21 @@ fn update(
     };
     if weapons.tubes.is_empty() {
         ui.confirmation = None;
-        for mut text in &mut status { **text = "Armement indisponible : aucun tube recu. Attendre la synchronisation.".into(); }
-        for (_, mut color) in &mut actions { *color = BackgroundColor(Color::srgb(0.045, 0.065, 0.075)); }
+        for mut text in &mut status {
+            **text = "Armement indisponible : aucun tube recu. Attendre la synchronisation.".into();
+        }
+        for (_, mut color) in &mut actions {
+            *color = BackgroundColor(Color::srgb(0.045, 0.065, 0.075));
+        }
         return;
     }
-    if ui.tube >= weapons.tubes.len() { ui.tube = 0; ui.confirmation = None; }
-    let Some(tube) = weapons.tubes.get(ui.tube) else { return; };
+    if ui.tube >= weapons.tubes.len() {
+        ui.tube = 0;
+        ui.confirmation = None;
+    }
+    let Some(tube) = weapons.tubes.get(ui.tube) else {
+        return;
+    };
     let current_solution = weapons.solutions.get(ui.tube).and_then(|s| s.as_ref());
     let tracks = state
         .tactical
@@ -284,8 +307,7 @@ fn update(
             || !tube.authorized
             || tube.phase != TubePhase::Ready
             || pending_configuration(&ui, tube.settings)
-            || !current_solution
-                .is_some_and(|s| s.launch_allowed)
+            || !current_solution.is_some_and(|s| s.launch_allowed)
     }) {
         ui.confirmation = None;
     }
@@ -319,18 +341,27 @@ fn update(
                 format!("Derniere commande acceptee : #{}.", id.0)
             })
         });
-    let events = state.events.iter().rev().filter_map(|(tick, event)| match event {
-        shared::GameEvent::TorpedoImpact { torpedo_id } => {
-            Some(format!("[tick {}] Explosion observee / torpille {}", tick, torpedo_id))
-        }
-        shared::GameEvent::TorpedoExpired { torpedo_id } => {
-            Some(format!("[tick {}] Fin de course estimee / torpille {} (impact non confirme)", tick, torpedo_id))
-        }
-        shared::GameEvent::TorpedoFired { bearing } => {
-            Some(format!("[tick {}] Torpille lancee / {:.0} deg", tick, bearing))
-        }
-        _ => None,
-    }).take(6).collect::<Vec<_>>();
+    let events = state
+        .events
+        .iter()
+        .rev()
+        .filter_map(|(tick, event)| match event {
+            shared::GameEvent::TorpedoImpact { torpedo_id } => Some(format!(
+                "[tick {}] Explosion observee / torpille {}",
+                tick, torpedo_id
+            )),
+            shared::GameEvent::TorpedoExpired { torpedo_id } => Some(format!(
+                "[tick {}] Fin de course estimee / torpille {} (impact non confirme)",
+                tick, torpedo_id
+            )),
+            shared::GameEvent::TorpedoFired { bearing } => Some(format!(
+                "[tick {}] Torpille lancee / {:.0} deg",
+                tick, bearing
+            )),
+            _ => None,
+        })
+        .take(6)
+        .collect::<Vec<_>>();
     let event = events.into_iter().rev().collect::<Vec<_>>().join("\n");
     let selected = tracks
         .iter()
@@ -416,25 +447,24 @@ fn update(
             }
             Action::Configure => {
                 ui.target.is_some()
+                    && tube.loaded
                     && matches!(
                         tube.phase,
                         TubePhase::Loaded | TubePhase::Flooded | TubePhase::Ready
                     )
             }
-            Action::Prepare if captain => {
-                tube.settings.is_some() && current_solution.is_some()
-            }
+            Action::Prepare if captain => tube.settings.is_some() && current_solution.is_some(),
             Action::Prepare => {
                 matches!(tube.phase, TubePhase::Empty | TubePhase::Flooded)
                     || (tube.phase == TubePhase::Loaded && tube.settings.is_some())
             }
             Action::Fire => {
                 !captain
+                    && tube.loaded
                     && !pending_configuration(&ui, tube.settings)
                     && tube.phase == TubePhase::Ready
                     && tube.authorized
-                    && current_solution
-                        .is_some_and(|s| s.launch_allowed)
+                    && current_solution.is_some_and(|s| s.launch_allowed)
             }
             Action::Cancel => {
                 !captain && matches!(tube.phase, TubePhase::Ready | TubePhase::Flooded)
@@ -513,6 +543,7 @@ fn tube_guidance(
         TubePhase::Loaded => "PROCHAINE ETAPE : Inonder (8s), puis Ouvrir (3s).".into(),
         TubePhase::Flooded if tube.settings.is_none() => "PROCHAINE ETAPE : Purger avant de recharger.".into(),
         TubePhase::Flooded => "PROCHAINE ETAPE : Ouvrir pour poursuivre, ou Fermer / purger pour annuler la preparation.".into(),
+        TubePhase::Ready if !tube.loaded => "TUBE VIDE : Fermer puis purger avant de charger une nouvelle torpille.".into(),
         TubePhase::Ready if current_solution.is_none() => "Tube ouvert, mais aucune solution valide : resoudre le blocage indique ci-dessus, puis Configurer si necessaire.".into(),
         TubePhase::Ready if !current_solution.is_some_and(|s| s.launch_allowed) => "TIR BLOQUE PAR LE POSITIONNEMENT : consulter les avertissements de la solution et demander une manoeuvre au Pilote.".into(),
         TubePhase::Ready if !tube.authorized && captain => "AUTORISATION MANQUANTE : verifier la configuration appliquee puis appuyer sur Autoriser.".into(),
@@ -536,5 +567,104 @@ fn phase_label(phase: TubePhase) -> &'static str {
         TubePhase::Ready => "Ouvert / pret",
         TubePhase::Closing => "Fermeture",
         TubePhase::Purging => "Purge",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::{ProtocolError, TubeMeasurements, WeaponsMeasurements};
+
+    fn lost_target() -> WeaponsMeasurements {
+        WeaponsMeasurements {
+            tubes: vec![TubeMeasurements {
+                phase: TubePhase::Ready,
+                loaded: true,
+                remaining_seconds: 0.0,
+                settings: Some(ShotSettings::for_target(TrackId(41))),
+                authorized: false,
+            }],
+            reserve: 4,
+            solutions: vec![None],
+            solution_errors: vec![Some(ProtocolError::TrackNotShared)],
+            torpedoes: vec![],
+        }
+    }
+
+    #[test]
+    fn guidance_distinguishes_lost_applied_target_and_unapplied_selection() {
+        let weapons = lost_target();
+        let ui = WeaponUi {
+            target: Some(TrackId(48)),
+            ..default()
+        };
+        let text = tube_guidance(&weapons, &[], &ui, false);
+        assert!(text.contains("vise P41, piste perdue"));
+        assert!(text.contains("SELECTION NON APPLIQUEE"));
+        assert!(text.contains("Configurer"));
+        assert!(!text.contains("PRET A TIRER"));
+        let captain = tube_guidance(&weapons, &[], &ui, true);
+        assert!(captain.contains("Ordre bot"));
+        assert!(!captain.contains("SELECTION NON APPLIQUEE"));
+    }
+
+    #[test]
+    fn guidance_handles_timer_specific_failure_and_missing_tube() {
+        let mut weapons = lost_target();
+        weapons.solution_errors[0] = Some(ProtocolError::MissingTargetSpeed);
+        weapons.tubes[0].phase = TubePhase::Opening;
+        weapons.tubes[0].remaining_seconds = 1.4;
+        let ui = WeaponUi {
+            target: Some(TrackId(41)),
+            ..default()
+        };
+        let text = tube_guidance(&weapons, &[], &ui, false);
+        assert!(text.contains("Vitesse cible inconnue"));
+        assert!(text.contains("Attendre 2s"));
+        let invalid = WeaponUi {
+            tube: 9,
+            ..default()
+        };
+        assert!(tube_guidance(&weapons, &[], &invalid, false).contains("Tube indisponible"));
+    }
+
+    #[test]
+    fn empty_and_reduced_snapshots_do_not_panic_or_keep_fire_confirmation() {
+        let mut app = App::new();
+        let mut player = LocalPlayer::default();
+        player.role = Some(CrewRole::Weapons);
+        let empty = WeaponsMeasurements {
+            tubes: vec![],
+            reserve: 0,
+            solutions: vec![],
+            solution_errors: vec![],
+            torpedoes: vec![],
+        };
+        app.insert_resource(GameState {
+            game_started: true,
+            weapons: Some(empty),
+            tactical: Some(shared::TacticalMeasurements {
+                shared_tracks: vec![],
+            }),
+            ..default()
+        })
+        .insert_resource(player)
+        .insert_resource(WeaponUi {
+            tube: 4,
+            confirmation: Some((4, ShotSettings::for_target(TrackId(1)))),
+            ..default()
+        })
+        .init_resource::<CommandQueue>()
+        .add_systems(Update, (buttons, update).chain());
+        app.world_mut().spawn((Interaction::Pressed, Action::Tube));
+        app.update();
+        assert!(app.world().resource::<WeaponUi>().confirmation.is_none());
+        let mut reduced = lost_target();
+        reduced.solutions.clear();
+        reduced.solution_errors.clear();
+        app.world_mut().resource_mut::<GameState>().weapons = Some(reduced);
+        app.update();
+        assert_eq!(app.world().resource::<WeaponUi>().tube, 0);
+        assert!(app.world().resource::<WeaponUi>().confirmation.is_none());
     }
 }

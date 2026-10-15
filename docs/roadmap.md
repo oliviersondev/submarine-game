@@ -238,7 +238,9 @@ M4 est livré sous forme minimale avec un protocole v4 sans compatibilité v3 : 
 
 Les tests couvrent procédures interdites, stock/délais, permissions, autorisations invalidées, interception, relèvement erroné, changement de route, dégâts, rejeu et impact caché. La compilation WASM est vérifiée ; les essais sur téléphone réel et l'équilibrage des valeurs provisoires restent à réaliser. Le modèle de collision des navires de surface est simplifié ; les avaries détaillées et la riposte restent en M5.
 
-Amélioration de prise en main : le protocole v5 expose les causes précises de solution indisponible. Le poste distingue explicitement sélection et réglages locaux de la configuration appliquée au tube, signale une piste perdue, indique la prochaine étape et différencie les anciens refus du blocage actuel. Les modifications locales non appliquées suspendent le tir jusqu'à configuration ou retour aux réglages appliqués. Le cas de vitesses cible/torpille égales reste une limitation de calcul, désormais expliquée au joueur.
+Amélioration de prise en main : le protocole v5 expose les causes précises de solution indisponible. Le poste distingue explicitement sélection et réglages locaux de la configuration appliquée au tube, signale une piste perdue, indique la prochaine étape et différencie les anciens refus du blocage actuel. Les modifications locales non appliquées suspendent le tir jusqu'à configuration ou retour aux réglages appliqués.
+
+Corrections de revue M4 (protocole v6) : limite de profondeur commune à la validation et aux impacts, refus précis des autorisations périmées, consignes bot sérialisées sur un seul tube et configurées après chargement, suivi indépendant des munitions, résolution des vitesses égales/proches, filtrage des événements de lancement, historique client borné et accès défensifs aux snapshots d'armement. Les régressions couvrent aussi les torpilles simultanées et les purges avec ou sans munition restante.
 
 ## 9. M5 - Escorte, attaque et contrôle des avaries
 

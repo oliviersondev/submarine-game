@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use std::collections::VecDeque;
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use shared::{
     codec::{decode, encode},
@@ -8,6 +7,7 @@ use shared::{
     ServerPayload, SessionId, SonarMeasurements, SubmarineSnapshot, SystemId, TacticalMeasurements,
     PROTOCOL_VERSION,
 };
+use std::collections::VecDeque;
 
 use crate::role::role_from_environment;
 
@@ -167,6 +167,7 @@ pub struct GameState {
     pub sonar: Option<SonarMeasurements>,
     pub tactical: Option<TacticalMeasurements>,
     pub weapons: Option<shared::WeaponsMeasurements>,
+    pub weapons_config: Option<shared::WeaponsConfig>,
     pub last_accepted_command: Option<CommandId>,
     pub snapshot_id: u64,
     pub server_tick: u64,
@@ -424,8 +425,10 @@ fn handle_server_message(
             commands.clear_intents();
         }
         ServerPayload::Lobby(lobby) => state.lobby = Some(lobby),
-        ServerPayload::MissionStarted { .. } => {
+        ServerPayload::MissionStarted { config } => {
             state.game_started = true;
+            state.weapons_config = Some(config.weapons);
+            state.events.clear();
             commands.clear_intents();
         }
         ServerPayload::Snapshot {
@@ -447,7 +450,9 @@ fn handle_server_message(
             state.server_tick = state.server_tick.max(tick);
             debug!("GameEvent: {event:?}");
             const EVENT_HISTORY_CAPACITY: usize = 64;
-            if state.events.len() == EVENT_HISTORY_CAPACITY { state.events.pop_front(); }
+            if state.events.len() == EVENT_HISTORY_CAPACITY {
+                state.events.pop_front();
+            }
             state.events.push_back((tick, event));
         }
         ServerPayload::Error { error, .. } => {
@@ -508,6 +513,51 @@ pub fn controls_for_role(role: CrewRole) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_batch_keeps_all_events_in_order_and_history_is_bounded() {
+        let mut player = LocalPlayer::default();
+        let mut state = GameState::default();
+        let mut commands = CommandQueue::default();
+        let events = [
+            GameEvent::TorpedoFired { bearing: 12.0 },
+            GameEvent::TorpedoImpact { torpedo_id: 1 },
+            GameEvent::TorpedoExpired { torpedo_id: 2 },
+        ];
+        for event in &events {
+            handle_server_message(
+                ServerPayload::Event {
+                    tick: 10,
+                    event: event.clone(),
+                },
+                &mut player,
+                &mut state,
+                &mut commands,
+            );
+        }
+        assert_eq!(
+            state
+                .events
+                .iter()
+                .map(|(_, event)| event.clone())
+                .collect::<Vec<_>>(),
+            events
+        );
+        for tick in 0..100 {
+            handle_server_message(
+                ServerPayload::Event {
+                    tick,
+                    event: GameEvent::TorpedoExpired { torpedo_id: tick },
+                },
+                &mut player,
+                &mut state,
+                &mut commands,
+            );
+        }
+        assert_eq!(state.events.len(), 64);
+        assert_eq!(state.events.front().unwrap().0, 36);
+        assert_eq!(state.events.back().unwrap().0, 99);
+    }
 
     #[test]
     fn command_queue_assigns_monotonic_ids() {

@@ -74,7 +74,7 @@ Le bouton qui affiche **Prof. torpille … m** fait défiler trois réglages. Le
 
 | Réglage | Effet des boutons | Effet sur le tir |
 |---|---|---|
-| `Prof.` | ±1 m, entre 1 et 15 m | Profondeur de la **torpille**, pas du sous-marin. Pour débuter contre un navire de surface, conserver 4 m. |
+| `Prof.` | ±1 m, entre 1 et 8 m par défaut | Profondeur de la **torpille**, pas du sous-marin. La limite suit la profondeur d'impact configurée pour la mission. Pour débuter, conserver 4 m. |
 | `Cap cible` | Correction de ±5°, limitée à ±45° | Corrige la route estimée de la cible utilisée pour le calcul. Ne règle pas directement le cap de la torpille. |
 | `Vit. cible` | Correction de ±1 nœud, limitée à ±10 nœuds | Corrige la vitesse estimée de la cible utilisée pour le calcul. Ne change pas la vitesse de la torpille. |
 
@@ -102,6 +102,8 @@ Il faut une configuration acceptée avant l'inondation. Les opérations temporis
 
 Une reconfiguration, une fermeture ou une purge annule l'autorisation. Si le positionnement bloque, demander une manœuvre au Pilote ; les réglages du poste Armement ne déplacent pas votre sous-marin.
 
+Si les réglages ont changé entre l'affichage du Capitaine et sa commande d'autorisation, celle-ci est refusée avec **« la configuration du tube a changé »**. Relire la configuration appliquée et autoriser à nouveau.
+
 ### Étape 6 — Tirer
 
 1. Appuyer sur **Tirer…**.
@@ -127,6 +129,8 @@ Pour abandonner une préparation avant le tir, utiliser **Fermer / purger** : d'
 
 Si un humain occupe l'Armement, **Ordre bot** est refusé : transmettre la cible au joueur, qui configure et prépare son tube. Le Capitaine reste responsable de l'autorisation, l'Armement du lancement.
 
+Un nouvel **Ordre bot** pendant une préparation remplace la cible du même tube, sans réserver une seconde torpille. Le bot attend la fin du chargement pour appliquer sa configuration ; une modification annule l'ancienne autorisation. Après un tir, attendre la fermeture et la purge avant de donner un nouvel ordre. Si la piste disparaît avant le tir, le bot referme/purge le tube si nécessaire et conserve sa munition pour une nouvelle préparation.
+
 ## 6. Comprendre les blocages
 
 | Message ou symptôme | Ce qu'il faut vérifier |
@@ -135,7 +139,8 @@ Si un humain occupe l'Armement, **Ordre bot** est refusé : transmettre la cible
 | `SELECTION NON APPLIQUEE` | Le tube vise toujours une autre piste. **Configurer** applique le nouveau choix. |
 | `REGLAGES NON APPLIQUES` | Les corrections locales diffèrent de celles du tube. Appliquer ou rétablir les réglages avant le tir. |
 | `Distance cible inconnue`, `Cap cible inconnu`, `Vitesse cible inconnue` | Attendre que les observations du Sonar permettent d'estimer la donnée manquante. |
-| `Vitesse cible corrigee egale a celle de la torpille` | Limitation actuelle du calcul : attendre une nouvelle estimation ou ajuster la correction de vitesse puis **Configurer**. |
+| `Torpille trop profonde pour une cible de surface` | Réduire **Prof. torpille** à la limite indiquée (8 m par défaut), puis **Configurer**. Ce réglage est refusé avant le tir. |
+| `Autorisation refusee : la configuration du tube a change` | Relire la configuration appliquée puis demander une nouvelle autorisation au Capitaine. |
 | `Aucune interception avec ces estimations` | Attendre de nouvelles observations ou corriger les réglages. |
 | `Interception au-dela de l'autonomie` | Rapprocher le sous-marin ou choisir une autre piste. |
 | `Direction du tir hors secteur` | Faire manœuvrer le Pilote ou utiliser un tube avant/arrière adapté à la direction du tir. |
@@ -156,9 +161,9 @@ Sur l'exemple `P6 7 deg / 3878m / conf. 69%`, `Cible cap 104 / 40.0 kn`, `TUBE 4
 - P6 est sélectionnée, mais **aucune configuration n'a été acceptée** pour le tube 4.
 - `Prof. 3m` correspond au réglage local de la torpille ; il n'est pas encore appliqué au tube.
 - La vitesse de 40 nœuds est une estimation sonar, qui peut être instable.
-- **Limitation du prototype :** le calcul actuel refuse le cas où la vitesse cible corrigée est exactement égale à celle de la torpille, même si certaines géométries pourraient permettre une interception. Ce n'est donc pas forcément une erreur de procédure du joueur.
+- Le refus systématique des vitesses égales présent dans les premières versions est corrigé : une cible qui approche peut désormais être interceptée à vitesse égale. Une cible qui s'éloigne à la même vitesse ne peut toujours pas être rattrapée.
 
-Pour poursuivre : sélectionner par exemple une piste `Merchant` partagée, vérifier ses estimations, conserver une profondeur de torpille de 4 m et tenter **Configurer**. Si l'estimation de vitesse reste à 40 nœuds, attendre d'autres observations ou essayer une correction manuelle de vitesse avant de reconfigurer. Une fois la configuration acceptée : **Inonder → Ouvrir → autorisation → Tirer… → CONFIRMER TIR**.
+Pour poursuivre : sélectionner par exemple une piste `Merchant` partagée, vérifier ses estimations, conserver une profondeur de torpille de 4 m et tenter **Configurer**. Une vitesse estimée à 40 nœuds ne bloque plus à elle seule le calcul : la direction du mouvement et la portée déterminent si l'interception est possible. Corriger les estimations uniquement si les observations le justifient. Une fois la configuration acceptée : **Inonder → Ouvrir → autorisation → Tirer… → CONFIRMER TIR**.
 
 `Derniere commande refusee` décrit un ancien résultat de commande, pas nécessairement le blocage actuel. Il est effacé à la prochaine commande acceptée. `Derniere action locale` décrit votre dernier appui ; ce n'est pas une confirmation serveur. Les messages de blocage et de prochaine étape sont calculés depuis le snapshot courant. `CONFIGURATION APPLIQUEE`, l'état du tube et la solution permettent de vérifier le résultat effectif.
 
@@ -167,6 +172,7 @@ Pour poursuivre : sélectionner par exemple une piste `Merchant` partagée, vér
 - `courses suivies` compte les courses propres suivies, pas les ennemis touchés.
 - Une **explosion observée** signale un impact entendu à portée d'écoute (6 km dans cette version). Elle ne confirme ni l'identité ni l'intégrité restante d'une cible.
 - Une **fin de course** correspond à l'épuisement estimé de l'autonomie. Ce n'est pas une preuve absolue que le tir a manqué : un impact hors portée d'écoute reste caché et sa course estimée continue jusqu'à son terme.
-- La trajectoire peut passer trop loin, devenir fausse après une manœuvre adverse, ou passer sous une coque si la profondeur réglée dépasse 8 m.
+- La trajectoire peut passer trop loin ou devenir fausse après une manœuvre adverse. Un réglage final plus profond que la zone d'impact est désormais refusé ; lors d'un lancement en profondeur, la torpille doit encore remonter à sa consigne avant de pouvoir toucher une coque.
+- Les événements de lancement, d'explosion et de fin de course sont envoyés au Capitaine, à l'Armement et au Sonar. Le client conserve un historique de 64 événements ; les six derniers événements d'armement sont affichés avec leur tick, y compris lorsqu'ils arrivent dans le même lot réseau.
 
 Pour les règles détaillées et les fonctionnalités à venir, voir le [GDD](game-design.md) et la [roadmap](roadmap.md).

@@ -101,8 +101,15 @@ impl Weapons {
             // Un nouvel ordre remplace la consigne du tube deja pris en charge.
             // La configuration sera appliquee par la meme commande que pour un humain,
             // une fois la phase de chargement terminee.
-            let index = self.bot_tube.map(|index| index as usize).or_else(|| self
-                .tubes.iter().position(|t| t.phase == Loaded || t.phase == Empty))
+            let index = self
+                .bot_tube
+                .map(|index| index as usize)
+                .or_else(|| {
+                    self.tubes
+                        .iter()
+                        .position(|t| t.phase == Loaded)
+                        .or_else(|| self.tubes.iter().position(|t| t.phase == Empty))
+                })
                 .ok_or(ProtocolError::InvalidTubePhase)?;
             let settings = ShotSettings::for_target(target);
             if !self.tubes[index].loaded && !matches!(self.tubes[index].phase, Empty | Loading) {
@@ -136,7 +143,9 @@ impl Weapons {
                 tube.settings = None;
                 tube.authorized = false;
             }
-            ConfigureShot { settings, .. } if tube.loaded && matches!(tube.phase, Loaded | Flooded | Ready) => {
+            ConfigureShot { settings, .. }
+                if tube.loaded && matches!(tube.phase, Loaded | Flooded | Ready) =>
+            {
                 validate_settings(settings, config)?;
                 solution(state, tracks, settings, config)?;
                 tube.settings = Some(settings);
@@ -161,8 +170,12 @@ impl Weapons {
                 tube.authorized = false;
             }
             AuthorizeShot { settings, .. } => {
-                if tube.settings != Some(settings) { return Err(ProtocolError::AuthorizationSettingsMismatch); }
-                if !tube.loaded { return Err(ProtocolError::InvalidTubePhase); }
+                if tube.settings != Some(settings) {
+                    return Err(ProtocolError::AuthorizationSettingsMismatch);
+                }
+                if !tube.loaded {
+                    return Err(ProtocolError::InvalidTubePhase);
+                }
                 validate_settings(settings, config)?;
                 solution(state, tracks, settings, config)?;
                 tube.authorized = true;
@@ -231,10 +244,32 @@ impl Weapons {
         };
         let tube = &self.tubes[index as usize];
         let pending = self.bot_settings;
+        if pending.is_some_and(|settings| !tracks.iter().any(|track| track.id == settings.target)) {
+            // Recuperer le tube apres la perte d'une piste au lieu de bloquer
+            // indefiniment le bot. Une munition non tiree reste chargee.
+            let cleanup = match tube.phase {
+                TubePhase::Ready => Some(PlayerCommand::CloseTube(index)),
+                TubePhase::Flooded => Some(PlayerCommand::PurgeTube(index)),
+                TubePhase::Loaded | TubePhase::Empty => {
+                    self.bot_tube = None;
+                    self.bot_settings = None;
+                    return vec![];
+                }
+                _ => None,
+            };
+            return cleanup
+                .and_then(|command| self.apply(command, state, tracks, config).ok())
+                .unwrap_or_default();
+        }
         let command = match tube.phase {
             TubePhase::Loaded | TubePhase::Flooded | TubePhase::Ready
                 if tube.loaded && pending.is_some() && tube.settings != pending =>
-                Some(PlayerCommand::ConfigureShot { tube: index, settings: pending.unwrap() }),
+            {
+                Some(PlayerCommand::ConfigureShot {
+                    tube: index,
+                    settings: pending.unwrap(),
+                })
+            }
             TubePhase::Loaded => Some(PlayerCommand::FloodTube(index)),
             TubePhase::Flooded if tube.loaded => Some(PlayerCommand::OpenTube(index)),
             TubePhase::Flooded => Some(PlayerCommand::PurgeTube(index)),
@@ -251,7 +286,9 @@ impl Weapons {
             Some(Ok(events)) => {
                 // La fermeture et la purge restent a la charge du bot, mais la
                 // consigne consommee ne doit pas reconfigurer un tube vide.
-                if fired { self.bot_settings = None; }
+                if fired {
+                    self.bot_settings = None;
+                }
                 events
             }
             _ => vec![],
@@ -269,7 +306,10 @@ impl Weapons {
             tube.remaining_seconds = (tube.remaining_seconds - dt).max(0.0);
             if tube.remaining_seconds == 0.0 {
                 tube.phase = match tube.phase {
-                    TubePhase::Loading => { tube.loaded = true; TubePhase::Loaded },
+                    TubePhase::Loading => {
+                        tube.loaded = true;
+                        TubePhase::Loaded
+                    }
                     TubePhase::Flooding => TubePhase::Flooded,
                     TubePhase::Opening => TubePhase::Ready,
                     TubePhase::Closing => TubePhase::Flooded,
@@ -333,7 +373,12 @@ impl Weapons {
     }
 
     pub(crate) fn needs_bot_order(&self) -> bool {
-        self.bot_tube.is_none() && self.reserve > 0
+        self.bot_tube.is_none()
+            && (self.reserve > 0
+                || self
+                    .tubes
+                    .iter()
+                    .any(|tube| tube.phase == TubePhase::Loaded))
     }
 }
 
@@ -348,7 +393,9 @@ fn validate_settings(settings: ShotSettings, config: WeaponsConfig) -> Result<()
         return Err(ProtocolError::InvalidShotSettings);
     }
     if settings.depth > config.max_surface_impact_depth {
-        return Err(ProtocolError::TorpedoDepthExceedsImpactZone { maximum_meters: config.max_surface_impact_depth });
+        return Err(ProtocolError::TorpedoDepthExceedsImpactZone {
+            maximum_meters: config.max_surface_impact_depth,
+        });
     }
     Ok(())
 }
@@ -386,21 +433,23 @@ pub(crate) fn solution(
     // Ne pas diviser par a, ce qui amplifie les erreurs d'arrondi.
     let time = if a.abs() <= ts * ts * 1e-6 {
         let time = -c / b;
-        if !time.is_finite() || time <= 0.0 { return Err(ProtocolError::NoFiringSolution); }
+        if !time.is_finite() || time <= 0.0 {
+            return Err(ProtocolError::NoFiringSolution);
+        }
         time
     } else {
-    if discriminant < 0.0 {
-        return Err(ProtocolError::NoFiringSolution);
-    }
-    let roots = [
-        (-b + discriminant.sqrt()) / (2.0 * a),
-        (-b - discriminant.sqrt()) / (2.0 * a),
-    ];
-    roots
-        .into_iter()
-        .filter(|t| t.is_finite() && *t > 0.0)
-        .reduce(f32::min)
-        .ok_or(ProtocolError::NoFiringSolution)?
+        if discriminant < 0.0 {
+            return Err(ProtocolError::NoFiringSolution);
+        }
+        let roots = [
+            (-b + discriminant.sqrt()) / (2.0 * a),
+            (-b - discriminant.sqrt()) / (2.0 * a),
+        ];
+        roots
+            .into_iter()
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .reduce(f32::min)
+            .ok_or(ProtocolError::NoFiringSolution)?
     };
     if time * ts > config.torpedo_range_meters {
         return Err(ProtocolError::InterceptOutOfRange);
@@ -759,6 +808,7 @@ mod tests {
         }
         let mut fast = tracks[0].clone();
         fast.speed = Some(config.torpedo_speed_knots);
+        fast.heading = Some(0.0);
         assert_eq!(
             solution(&state, &[fast], settings, config),
             Err(ProtocolError::NoFiringSolution)
@@ -876,14 +926,37 @@ mod tests {
         let mut settings = weapons.tubes[0].settings.unwrap();
         settings.depth = 9.0;
         let before = weapons.measurements(&state, &tracks, config);
-        assert_eq!(weapons.apply(PlayerCommand::ConfigureShot { tube: 0, settings }, &state, &tracks, config),
-            Err(ProtocolError::TorpedoDepthExceedsImpactZone { maximum_meters: 8.0 }));
+        assert_eq!(
+            weapons.apply(
+                PlayerCommand::ConfigureShot { tube: 0, settings },
+                &state,
+                &tracks,
+                config
+            ),
+            Err(ProtocolError::TorpedoDepthExceedsImpactZone {
+                maximum_meters: 8.0
+            })
+        );
         assert_eq!(weapons.measurements(&state, &tracks, config), before);
-        let deeper_config = WeaponsConfig { max_surface_impact_depth: 10.0, ..config };
-        weapons.apply(PlayerCommand::ConfigureShot { tube: 0, settings }, &state, &tracks, deeper_config).unwrap();
-        world.vessels[0].x = 0.0; world.vessels[0].y = 1000.0;
+        let deeper_config = WeaponsConfig {
+            max_surface_impact_depth: 10.0,
+            ..config
+        };
+        weapons
+            .apply(
+                PlayerCommand::ConfigureShot { tube: 0, settings },
+                &state,
+                &tracks,
+                deeper_config,
+            )
+            .unwrap();
+        world.vessels[0].x = 0.0;
+        world.vessels[0].y = 1000.0;
         assert_eq!(world.impact(0.0, 0.0, 0.0, 2000.0, 9.0, config), None);
-        assert_eq!(world.impact(0.0, 0.0, 0.0, 2000.0, 9.0, deeper_config), Some(true));
+        assert_eq!(
+            world.impact(0.0, 0.0, 0.0, 2000.0, 9.0, deeper_config),
+            Some(true)
+        );
     }
 
     #[test]
@@ -891,26 +964,61 @@ mod tests {
         let (mut weapons, _, state, config, tracks) = ready();
         let old = weapons.tubes[0].settings.unwrap();
         let changed = ShotSettings { depth: 3.0, ..old };
-        weapons.apply(PlayerCommand::ConfigureShot { tube: 0, settings: changed }, &state, &tracks, config).unwrap();
-        assert_eq!(weapons.apply(PlayerCommand::AuthorizeShot { tube: 0, settings: old }, &state, &tracks, config),
-            Err(ProtocolError::AuthorizationSettingsMismatch));
+        weapons
+            .apply(
+                PlayerCommand::ConfigureShot {
+                    tube: 0,
+                    settings: changed,
+                },
+                &state,
+                &tracks,
+                config,
+            )
+            .unwrap();
+        assert_eq!(
+            weapons.apply(
+                PlayerCommand::AuthorizeShot {
+                    tube: 0,
+                    settings: old
+                },
+                &state,
+                &tracks,
+                config
+            ),
+            Err(ProtocolError::AuthorizationSettingsMismatch)
+        );
         assert!(!weapons.tubes[0].authorized);
         assert_eq!(weapons.tubes[0].settings, Some(changed));
     }
 
     #[test]
     fn repeated_bot_orders_retarget_one_tube_and_configure_only_after_loading() {
-        let mut weapons = Weapons::new(); let mut world = World::new(0);
-        let state = SubmarineState::default(); let config = WeaponsConfig::default();
-        let first = track(); let second = TrackEstimate { id: TrackId(43), ..track() };
+        let mut weapons = Weapons::new();
+        let mut world = World::new(0);
+        let state = SubmarineState::default();
+        let config = WeaponsConfig::default();
+        let first = track();
+        let second = TrackEstimate {
+            id: TrackId(43),
+            ..track()
+        };
         let tracks = [first, second];
         for target in [TrackId(42), TrackId(43)] {
-            weapons.apply(PlayerCommand::OrderWeaponsBot { target }, &state, &tracks, config).unwrap();
+            weapons
+                .apply(
+                    PlayerCommand::OrderWeaponsBot { target },
+                    &state,
+                    &tracks,
+                    config,
+                )
+                .unwrap();
         }
         assert_eq!(weapons.reserve, 4);
         assert_eq!(weapons.tubes[0].phase, TubePhase::Loading);
         assert!(weapons.tubes[0].settings.is_none());
-        assert!(weapons.tubes[1..].iter().all(|t| t.phase == TubePhase::Empty));
+        assert!(weapons.tubes[1..]
+            .iter()
+            .all(|t| t.phase == TubePhase::Empty));
         let mut events = vec![];
         for _ in 0..80 {
             weapons.update(1.0, &mut world, config, &state);
@@ -920,8 +1028,18 @@ mod tests {
         assert_eq!(weapons.tubes[0].phase, TubePhase::Ready);
         assert!(events.is_empty());
         let settings = weapons.tubes[0].settings.unwrap();
-        weapons.apply(PlayerCommand::AuthorizeShot { tube: 0, settings }, &state, &tracks, config).unwrap();
-        assert_eq!(weapons.automate(&state, &tracks, config, true, false).len(), 1);
+        weapons
+            .apply(
+                PlayerCommand::AuthorizeShot { tube: 0, settings },
+                &state,
+                &tracks,
+                config,
+            )
+            .unwrap();
+        assert_eq!(
+            weapons.automate(&state, &tracks, config, true, false).len(),
+            1
+        );
         for _ in 0..20 {
             weapons.update(1.0, &mut world, config, &state);
             weapons.automate(&state, &tracks, config, true, false);
@@ -931,25 +1049,90 @@ mod tests {
     }
 
     #[test]
+    fn bot_recovers_a_lost_track_without_discarding_the_loaded_torpedo() {
+        let mut weapons = Weapons::new();
+        let mut world = World::new(0);
+        let state = SubmarineState::default();
+        let config = WeaponsConfig::default();
+        let tracks = [track()];
+        weapons
+            .apply(
+                PlayerCommand::OrderWeaponsBot {
+                    target: TrackId(42),
+                },
+                &state,
+                &tracks,
+                config,
+            )
+            .unwrap();
+        for _ in 0..40 {
+            weapons.update(1.0, &mut world, config, &state);
+            weapons.automate(&state, &tracks, config, true, false);
+        }
+        assert_eq!(weapons.tubes[0].phase, TubePhase::Ready);
+        for _ in 0..20 {
+            weapons.update(1.0, &mut world, config, &state);
+            weapons.automate(&state, &[], config, true, false);
+        }
+        assert_eq!(weapons.tubes[0].phase, TubePhase::Loaded);
+        assert!(weapons.tubes[0].loaded);
+        assert!(weapons.needs_bot_order());
+        assert_eq!(weapons.reserve, 4);
+        let new_tracks = [TrackEstimate {
+            id: TrackId(43),
+            ..track()
+        }];
+        weapons
+            .apply(
+                PlayerCommand::OrderWeaponsBot {
+                    target: TrackId(43),
+                },
+                &state,
+                &new_tracks,
+                config,
+            )
+            .unwrap();
+        weapons.automate(&state, &new_tracks, config, true, false);
+        assert_eq!(weapons.tubes[0].settings.unwrap().target, TrackId(43));
+        assert_eq!(weapons.reserve, 4);
+    }
+
+    #[test]
     fn purging_keeps_unfired_ammunition_but_cannot_recreate_a_fired_torpedo() {
         let (mut weapons, mut world, state, config, tracks) = ready();
-        weapons.apply(PlayerCommand::CloseTube(0), &state, &tracks, config).unwrap();
+        weapons
+            .apply(PlayerCommand::CloseTube(0), &state, &tracks, config)
+            .unwrap();
         weapons.update(config.door_seconds, &mut world, config, &state);
-        weapons.apply(PlayerCommand::PurgeTube(0), &state, &tracks, config).unwrap();
+        weapons
+            .apply(PlayerCommand::PurgeTube(0), &state, &tracks, config)
+            .unwrap();
         weapons.update(config.purge_seconds, &mut world, config, &state);
         assert_eq!(weapons.tubes[0].phase, TubePhase::Loaded);
         assert!(weapons.tubes[0].loaded);
         let settings = weapons.tubes[0].settings.unwrap();
-        for (command, wait) in [(PlayerCommand::FloodTube(0), config.flood_seconds),
+        for (command, wait) in [
+            (PlayerCommand::FloodTube(0), config.flood_seconds),
             (PlayerCommand::OpenTube(0), config.door_seconds),
             (PlayerCommand::AuthorizeShot { tube: 0, settings }, 0.0),
-            (PlayerCommand::FireTorpedo { tube: 0 }, config.door_seconds)] {
+            (PlayerCommand::FireTorpedo { tube: 0 }, config.door_seconds),
+        ] {
             weapons.apply(command, &state, &tracks, config).unwrap();
             weapons.update(wait, &mut world, config, &state);
         }
         assert!(!weapons.tubes[0].loaded);
-        assert_eq!(weapons.apply(PlayerCommand::ConfigureShot { tube: 0, settings }, &state, &tracks, config), Err(ProtocolError::InvalidTubePhase));
-        weapons.apply(PlayerCommand::PurgeTube(0), &state, &tracks, config).unwrap();
+        assert_eq!(
+            weapons.apply(
+                PlayerCommand::ConfigureShot { tube: 0, settings },
+                &state,
+                &tracks,
+                config
+            ),
+            Err(ProtocolError::InvalidTubePhase)
+        );
+        weapons
+            .apply(PlayerCommand::PurgeTube(0), &state, &tracks, config)
+            .unwrap();
         weapons.update(config.purge_seconds, &mut world, config, &state);
         assert_eq!(weapons.tubes[0].phase, TubePhase::Empty);
         assert_eq!(weapons.reserve, 4);
@@ -960,37 +1143,76 @@ mod tests {
         let (mut weapons, mut world, state, config, tracks) = ready();
         world.vessels.clear();
         let settings = weapons.tubes[0].settings.unwrap();
-        for (command, wait) in [(PlayerCommand::LoadTube(1), config.load_seconds),
+        for (command, wait) in [
+            (PlayerCommand::LoadTube(1), config.load_seconds),
             (PlayerCommand::ConfigureShot { tube: 1, settings }, 0.0),
             (PlayerCommand::FloodTube(1), config.flood_seconds),
-            (PlayerCommand::OpenTube(1), config.door_seconds)] {
+            (PlayerCommand::OpenTube(1), config.door_seconds),
+        ] {
             weapons.apply(command, &state, &tracks, config).unwrap();
             weapons.update(wait, &mut world, config, &state);
         }
         for tube in 0..2 {
-            weapons.apply(PlayerCommand::AuthorizeShot { tube, settings }, &state, &tracks, config).unwrap();
-            weapons.apply(PlayerCommand::FireTorpedo { tube }, &state, &tracks, config).unwrap();
+            weapons
+                .apply(
+                    PlayerCommand::AuthorizeShot { tube, settings },
+                    &state,
+                    &tracks,
+                    config,
+                )
+                .unwrap();
+            weapons
+                .apply(PlayerCommand::FireTorpedo { tube }, &state, &tracks, config)
+                .unwrap();
         }
         let runs = weapons.measurements(&state, &tracks, config).torpedoes;
-        assert_eq!(runs.len(), 2); assert_ne!(runs[0].id, runs[1].id);
+        assert_eq!(runs.len(), 2);
+        assert_ne!(runs[0].id, runs[1].id);
         let events = weapons.update(400.0, &mut world, config, &state);
-        assert_eq!(events, vec![GameEvent::TorpedoExpired { torpedo_id: runs[0].id }, GameEvent::TorpedoExpired { torpedo_id: runs[1].id }]);
-        assert!(weapons.torpedoes.is_empty()); assert_eq!(weapons.reserve, 3);
+        assert_eq!(
+            events,
+            vec![
+                GameEvent::TorpedoExpired {
+                    torpedo_id: runs[0].id
+                },
+                GameEvent::TorpedoExpired {
+                    torpedo_id: runs[1].id
+                }
+            ]
+        );
+        assert!(weapons.torpedoes.is_empty());
+        assert_eq!(weapons.reserve, 3);
     }
 
     #[test]
     fn equal_and_nearly_equal_speeds_solve_approaching_targets_without_unstable_roots() {
-        let state = SubmarineState::default(); let config = WeaponsConfig::default();
+        let state = SubmarineState::default();
+        let config = WeaponsConfig::default();
         let settings = ShotSettings::for_target(TrackId(42));
-        for speed in [config.torpedo_speed_knots, config.torpedo_speed_knots - 0.00001,
-            config.torpedo_speed_knots + 0.00001] {
-            let approaching = TrackEstimate { heading: Some(180.0), speed: Some(speed), ..track() };
+        for speed in [
+            config.torpedo_speed_knots,
+            config.torpedo_speed_knots - 0.00001,
+            config.torpedo_speed_knots + 0.00001,
+        ] {
+            let approaching = TrackEstimate {
+                heading: Some(180.0),
+                speed: Some(speed),
+                ..track()
+            };
             let solution = solution(&state, &[approaching], settings, config).unwrap();
-            let expected = 1000.0 / ((speed + config.torpedo_speed_knots) * KNOTS_TO_METERS_PER_SECOND);
+            let expected =
+                1000.0 / ((speed + config.torpedo_speed_knots) * KNOTS_TO_METERS_PER_SECOND);
             assert!((solution.run_seconds - expected).abs() < 0.001);
             assert!(crate::shortest_angle(0.0, solution.bearing).abs() < 0.001);
         }
-        let receding = TrackEstimate { heading: Some(0.0), speed: Some(config.torpedo_speed_knots), ..track() };
-        assert_eq!(solution(&state, &[receding], settings, config), Err(ProtocolError::NoFiringSolution));
+        let receding = TrackEstimate {
+            heading: Some(0.0),
+            speed: Some(config.torpedo_speed_knots),
+            ..track()
+        };
+        assert_eq!(
+            solution(&state, &[receding], settings, config),
+            Err(ProtocolError::NoFiringSolution)
+        );
     }
 }
