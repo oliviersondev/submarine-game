@@ -312,6 +312,14 @@ stateDiagram-v2
 
 Une escorte ne connaît pas la position réelle du joueur. Elle exploite ses propres observations, la dernière position estimée, les tirs détectés et les alertes du convoi.
 
+**Règles livrées en M5.1 :** une escorte alterne escorte du convoi, suspicion, recherche et retour progressif à sa formation. Son écoute passive dépend du bruit du joueur, de la distance et de son propre bruit lié à la vitesse. Un ping du joueur ne crée une observation privée que s'il est à portée ; cette observation reste imparfaite. Une explosion proche crée une alerte autour de l'impact, jamais une piste du tireur. Les états d'attaque restent prévus pour M5.2 ; aucune détection visuelle ou aérienne n'est simulée en M5.1.
+
+La piste ennemie possède une confiance, une ancienneté et une incertitude. Sans observation, sa confiance diminue et son incertitude augmente ; sa position estimée n'est pas recalée sur le joueur réel. L'escorte explore cette zone par points successifs, avec vitesse et virage limités. Elle retourne au convoi lorsque la piste expire ou que la durée maximale de recherche est atteinte. Une courte période de retour évite une réentrée immédiate en recherche.
+
+En recherche, l'escorte émet périodiquement un ping actif. Son émission et son écho sont deux calculs distincts : le joueur peut entendre un ping sans être détecté. Sonar et Capitaine reçoivent uniquement un relèvement bruité et son incertitude, sans distance exacte, identité, état de l'IA ni confirmation d'un écho. Le poste Sonar et la carte tactique affichent les trois derniers pings entendus dans l'historique client borné.
+
+Les paramètres provisoires sont centralisés dans `EscortConfig` : écoute passive à 6 000 m et balayage chaque seconde, réception des pings à 10 000 m, écho actif jusqu'à 3 000 m de distance oblique, ping toutes les 12 s en recherche, alerte d'explosion à 3 000 m. Une piste expire après 60 s sans observation ; la suspicion dure au plus 30 s et la recherche 180 s. Une alerte d'explosion seule permet une recherche après la suspicion. Le retour comporte une grâce de 20 s ; la recherche utilise 8 nœuds et le retour jusqu'à 15 nœuds, avec un taux de virage de 5°/s et une accélération de 0,75 nœud/s. Ces valeurs ne constituent pas encore un équilibrage validé en jeu.
+
 ### 6.7 Solution de tir
 
 La solution prédit le point d'interception à partir de la position relative, du cap et de la vitesse estimés de la cible, ainsi que des caractéristiques de la torpille. Sa stabilité dépend de la qualité de la piste et de la durée d'observation.
@@ -352,7 +360,7 @@ Certaines étapes peuvent être automatisées par un ordre, mais leur durée, le
 
 La présence d'une munition est indépendante de la configuration du tube : un tube vidé par un lancement ne peut pas être reconfiguré pour créer une nouvelle torpille. Une autorisation portant sur une configuration périmée est refusée avec un diagnostic distinct. Un nouvel ordre au bot Armement remplace la consigne du tube déjà pris en charge, sans affecter une seconde munition ; le bot attend la fin du chargement avant de configurer par la même procédure qu'un humain. Après perte d'une piste, il referme et purge si nécessaire, puis rend disponible le tube encore chargé. Pendant la fermeture/purge d'un tube vidé par un tir, attendre la fin de remise en état avant un nouvel ordre.
 
-Les bâtiments ennemis disposent d'une intégrité privée initiale de 100. Les dégâts par torpille sont configurables (100 par défaut) ; à zéro, le bâtiment coule, cesse de naviguer et ne produit plus d'observation sonar. Les navires survivants à moins de 3 000 m d'un impact observé changent leur route de 35°. La recherche et la riposte tactiques de l'escorte restent prévues en M5.
+Les bâtiments ennemis disposent d'une intégrité privée initiale de 100. Les dégâts par torpille sont configurables (100 par défaut) ; à zéro, le bâtiment coule, cesse de naviguer et ne produit plus d'observation sonar. Les cargos survivants à moins de 3 000 m d'un impact observé changent leur route de 35°. Depuis M5.1, l'escorte réagit par sa procédure de suspicion/recherche, sans virage instantané. Une escorte coulée ne reçoit plus d'observation et n'émet plus de ping. La riposte armée reste prévue en M5.2.
 
 ### 6.9 Dégâts et avaries
 

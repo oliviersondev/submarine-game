@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{BallastState, CrewRole, MissionSnapshot, SubmarineConfig, SystemId, TrackId};
 
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -21,6 +21,7 @@ pub struct MissionConfig {
     pub seed: u64,
     pub submarine: SubmarineConfig,
     pub weapons: crate::WeaponsConfig,
+    pub escort: EscortConfig,
 }
 
 impl MissionConfig {
@@ -29,6 +30,57 @@ impl MissionConfig {
             seed,
             submarine: SubmarineConfig::default(),
             weapons: crate::WeaponsConfig::default(),
+            escort: EscortConfig::default(),
+        }
+    }
+}
+
+/// Provisional M5.1 tuning. Distances in metres, times in seconds, speeds in knots.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct EscortConfig {
+    pub passive_range: f32,
+    pub ping_hearing_range: f32,
+    pub active_range: f32,
+    pub explosion_hearing_range: f32,
+    pub passive_interval: f32,
+    pub ping_interval: f32,
+    pub track_lifetime: f32,
+    pub suspicion_duration: f32,
+    pub search_duration: f32,
+    pub return_grace: f32,
+    /// Confidence points lost per second (confidence is bounded to 0..=100).
+    pub confidence_decay: f32,
+    pub search_confidence: f32,
+    /// Metres of additional uncertainty per second without a new observation.
+    pub uncertainty_growth: f32,
+    pub search_speed: f32,
+    pub return_speed: f32,
+    /// Degrees per second.
+    pub turn_rate: f32,
+    /// Knots per second, also used for deceleration.
+    pub acceleration: f32,
+}
+
+impl Default for EscortConfig {
+    fn default() -> Self {
+        Self {
+            passive_range: 6_000.0,
+            ping_hearing_range: 10_000.0,
+            active_range: 3_000.0,
+            explosion_hearing_range: 3_000.0,
+            passive_interval: 1.0,
+            ping_interval: 12.0,
+            track_lifetime: 60.0,
+            suspicion_duration: 30.0,
+            search_duration: 180.0,
+            return_grace: 20.0,
+            confidence_decay: 1.0,
+            search_confidence: 55.0,
+            uncertainty_growth: 8.0,
+            search_speed: 8.0,
+            return_speed: 15.0,
+            turn_rate: 5.0,
+            acceleration: 0.75,
         }
     }
 }
@@ -93,6 +145,11 @@ pub enum GameEvent {
     TorpedoFired { bearing: f32 },
     TorpedoImpact { torpedo_id: u64 },
     TorpedoExpired { torpedo_id: u64 },
+    /// An audible emission, not confirmation of an enemy echo or identification.
+    SonarPingHeard {
+        bearing: f32,
+        bearing_uncertainty: f32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -273,32 +330,32 @@ mod tests {
     }
 
     #[test]
-    fn version_six_fixtures_detect_enum_reordering() {
+    fn version_seven_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![6, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![6, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[6, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[6, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![7, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![7, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[7, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[7, 0, 2, 1]).unwrap(), ready);
     }
 
     #[test]
-    fn version_six_m2_command_fixture_is_stable() {
+    fn version_seven_m2_command_fixture_is_stable() {
         let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::SetBallast(BallastState::Flood),
         }));
-        let fixture = vec![6, 1, 0, 9, 3, 0];
+        let fixture = vec![7, 1, 0, 9, 3, 0];
         assert_eq!(encode(&message), fixture);
         assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
     }
 
     #[test]
-    fn version_six_weapons_and_acknowledgment_fixtures_are_stable() {
+    fn version_seven_weapons_and_acknowledgment_fixtures_are_stable() {
         let load = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::LoadTube(0),
@@ -308,8 +365,8 @@ mod tests {
             command: PlayerCommand::FireTorpedo { tube: 0 },
         }));
         for (message, fixture) in [
-            (load, vec![6, 1, 0, 9, 15, 0]),
-            (fire, vec![6, 1, 0, 9, 9, 0]),
+            (load, vec![7, 1, 0, 9, 15, 0]),
+            (fire, vec![7, 1, 0, 9, 9, 0]),
         ] {
             assert_eq!(encode(&message), fixture);
             assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
@@ -317,8 +374,8 @@ mod tests {
         let ack = ServerMessage::new(ServerPayload::CommandAccepted {
             command_id: CommandId(9),
         });
-        assert_eq!(encode(&ack), vec![6, 0, 9]);
-        assert_eq!(decode::<ServerMessage>(&[6, 0, 9]).unwrap(), ack);
+        assert_eq!(encode(&ack), vec![7, 0, 9]);
+        assert_eq!(decode::<ServerMessage>(&[7, 0, 9]).unwrap(), ack);
         let configured = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(10),
             command: PlayerCommand::ConfigureShot {
@@ -333,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn version_six_mission_snapshot_round_trips() {
+    fn version_seven_mission_snapshot_round_trips() {
         let message = ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id: 3,
             tick: 7,
@@ -366,6 +423,24 @@ mod tests {
                 tactical: None,
                 weapons: None,
             },
+        });
+        assert_eq!(decode::<ServerMessage>(&encode(&message)).unwrap(), message);
+    }
+
+    #[test]
+    fn version_seven_ping_fixture_and_mission_config_round_trip() {
+        let ping = ServerMessage::new(ServerPayload::Event {
+            tick: 42,
+            event: GameEvent::SonarPingHeard {
+                bearing: 90.0,
+                bearing_uncertainty: 3.0,
+            },
+        });
+        let fixture = vec![7, 5, 42, 8, 0, 0, 180, 66, 0, 0, 64, 64];
+        assert_eq!(encode(&ping), fixture);
+        assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), ping);
+        let message = ServerMessage::new(ServerPayload::MissionStarted {
+            config: MissionConfig::new(123),
         });
         assert_eq!(decode::<ServerMessage>(&encode(&message)).unwrap(), message);
     }

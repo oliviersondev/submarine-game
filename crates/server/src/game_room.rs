@@ -175,6 +175,16 @@ fn broadcast(
 ) {
     let message = ServerMessage::new(payload);
     for (role, tx) in players.values() {
+        if matches!(
+            &message.payload,
+            ServerPayload::Event {
+                event: shared::GameEvent::SonarPingHeard { .. },
+                ..
+            }
+        ) && !matches!(role, CrewRole::Captain | CrewRole::Sonar)
+        {
+            continue;
+        }
         if let ServerPayload::Event {
             event:
                 shared::GameEvent::TorpedoFired { .. }
@@ -569,5 +579,32 @@ mod tests {
         assert!(command_allowed_for_role(CrewRole::Sonar, &command));
         assert!(!command_allowed_for_role(CrewRole::Captain, &command));
         assert!(!command_allowed_for_role(CrewRole::Weapons, &command));
+    }
+
+    #[test]
+    fn audible_pings_are_only_sent_to_captain_and_sonar() {
+        let mut players = HashMap::new();
+        let mut receivers = vec![];
+        for (index, role) in CrewRole::ALL.into_iter().enumerate() {
+            let (tx, rx) = mpsc::channel(4);
+            players.insert(PlayerId(index as u64), (role, tx));
+            receivers.push((role, rx));
+        }
+        broadcast(
+            &players,
+            ServerPayload::Event {
+                tick: 1,
+                event: shared::GameEvent::SonarPingHeard {
+                    bearing: 45.0,
+                    bearing_uncertainty: 3.0,
+                },
+            },
+        );
+        for (role, mut rx) in receivers {
+            assert_eq!(
+                rx.try_recv().is_ok(),
+                matches!(role, CrewRole::Captain | CrewRole::Sonar)
+            );
+        }
     }
 }

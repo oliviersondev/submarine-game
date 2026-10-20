@@ -31,7 +31,7 @@ Le dépôt fournit déjà :
 - interfaces tactiles Pilote, Ingénierie, Sonar et carte tactique du Capitaine.
 - procédure tactile d'armement, autorisation du Capitaine, torpilles simulées et dégâts aux navires.
 
-Les réparations et la recherche/attaque tactique de l'escorte sont encore symboliques. Le convoi change simplement de route aux impacts proches. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
+L'escorte possède une recherche acoustique privée, des pings actifs et un retour au convoi après perte de contact (M5.1). Les cargos changent de route aux impacts proches. La riposte armée et les avaries restent à réaliser ; les réparations sont encore symboliques. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
 
 ## 3. Vue d'ensemble
 
@@ -280,6 +280,14 @@ Corrections de revue M4 (protocole v6) : limite de profondeur commune à la vali
 ### Critère de validation
 
 Après avoir attaqué, l'équipage peut rompre le contact et survivre à une recherche ennemie en contrôlant bruit, profondeur et dégâts.
+
+### Découpage et état de M5
+
+- **M5.1 — Recherche acoustique : implémenté le 20 octobre 2026.** Escorte, suspicion, recherche et retour au convoi ; observations passives, réception des pings du joueur, sonar actif ennemi, vieillissement de piste et alerte d'explosion sans localisation du tireur. Protocole v7 incompatible v6 : `EscortConfig` et événement de ping entendu, limité au Sonar et au Capitaine. Le client affiche les trois dernières émissions entendues sans confirmation de détection. Les tests couvrent portée, bruit propre, écho imparfait, émission sans écho, escorte coulée, durée bornée, manœuvres limitées et indépendance vis-à-vis des déplacements non observés. L'essai navigateur/téléphone et l'équilibrage restent à réaliser.
+- **M5.2 — Riposte et dégâts : à réaliser.** État d'attaque, charges de profondeur simulées, dégâts de coque, compartiments et voies d'eau, effets sur la profondeur, alertes et causes conservées pour le bilan.
+- **M5.3 — Contrôle des avaries : à réaliser.** Pompage, isolation, réparations temporisées, incendies, pannes, propagation limitée, conséquences sur les commandes, priorités et bot Ingénierie utilisable en solo.
+
+M5.1 exclut volontairement détection visuelle/aérienne, charges de profondeur et dégâts au sous-marin. M5 reste incomplet tant que la riposte et le contrôle des avaries ne sont pas jouables.
 
 ## 10. M6 - Mission de référence complète
 

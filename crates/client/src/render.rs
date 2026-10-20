@@ -1661,6 +1661,10 @@ fn update_sonar_station(
         }
     );
     observations.0 = observation_list(&sonar.observations);
+    let pings = ping_journal(&state);
+    if !pings.is_empty() {
+        observations.0 = format!("{pings}\n{}", observations.0);
+    }
 
     for (slot, mut text, mut visibility, mut background, mut border) in &mut slots {
         let Some(track) = sonar.tracks.get(slot.0) else {
@@ -1736,6 +1740,37 @@ fn update_tactical_station(
             .join(" / ");
         format!("{own_state}{tracks}")
     };
+    let pings = ping_journal(&state);
+    if !pings.is_empty() {
+        list.0.push_str(&format!("\n{pings}"));
+    }
+}
+
+fn ping_journal(state: &GameState) -> String {
+    let mut entries = state
+        .events
+        .iter()
+        .rev()
+        .filter_map(|(tick, event)| {
+            if let shared::GameEvent::SonarPingHeard {
+                bearing,
+                bearing_uncertainty,
+            } = event
+            {
+                Some(format!(
+                    "[t{tick}] {bearing:03.0} deg +/-{bearing_uncertainty:.0}"
+                ))
+            } else {
+                None
+            }
+        })
+        .take(3)
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return String::new();
+    }
+    entries.reverse();
+    format!("PINGS ENTENDUS / ECHO INCONNU\n{}", entries.join("\n"))
 }
 
 fn update_polar_markers(

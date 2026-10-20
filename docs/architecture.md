@@ -113,9 +113,9 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
 | Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
 | Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation et recharge | distribution détaillée, compartiments, avaries et réparations temporisées |
-| IA | bots Pilote/Ingénierie minimaux, partage du bot Sonar, préparation Armement sur ordre et autorisation Capitaine | bots de poste complets et comportement tactique ennemi |
+| IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche et retour au convoi | bots de poste complets et attaque tactique ennemie |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
-| Protocole | version 6, identifiants opaques, projections par rôle, diagnostics d'armement et accusés de commandes | reprise et négociation de compatibilité |
+| Protocole | version 7, identifiants opaques, projections par rôle, diagnostics d'armement, pings entendus et accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -170,6 +170,12 @@ Les mesures d'armement sont projetées uniquement vers le Capitaine et l'Armemen
 Le protocole v5 a ajouté `WeaponsMeasurements::solution_errors`, aligné sur les tubes et les solutions. La simulation distingue les données de piste manquantes, une piste perdue/non partagée, l'absence d'interception et l'autonomie insuffisante. Une solution calculable hors secteur conserve sa direction et ses avertissements, mais interdit le lancement ; un tir hors secteur reçoit une erreur distincte. Ces diagnostics n'utilisent que la piste partagée et la configuration du tir, sans information ennemie cachée. Le client distingue sélection locale, configuration appliquée, état courant et résultat de la dernière commande.
 
 Le protocole v6 ajoute `TubeMeasurements::loaded`, `WeaponsConfig::max_surface_impact_depth` et des refus explicites pour profondeur incompatible et autorisation portant sur des réglages périmés. Les vitesses égales sont désormais traitées par le calcul linéaire d'interception, sans erreur spéciale. Les consignes bot en attente restent privées à la simulation et passent par `ConfigureShot` après chargement. Les événements de lancement avec relèvement, d'explosion et de fin de course sont réservés à Capitaine/Armement/Sonar. Le client conserve les 64 derniers événements avec leur tick ; le poste Armement affiche les six derniers événements d'armement dans l'ordre chronologique, sans écrasement des événements reçus dans un même lot réseau.
+
+M5.1 ajoute `enemy_ai.rs`, propriétaire privé des états escorte/suspicion/recherche/retour, des pistes vieillissantes et des points de recherche. Ce module ne reçoit jamais `SubmarineState` : seules les fonctions de perception dans `detection.rs` consultent l'état réel pour produire des observations bruitées. `world.rs` orchestre les capteurs, les décisions et les déplacements limités, connaît les positions amies du convoi et transforme les impacts audibles en alertes de zone, sans fournir l'origine du tir. Une escorte coulée est exclue des capteurs et des décisions.
+
+L'ordre du tick est stable : mouvement/ressources/bruit du joueur, vieillissement de la mémoire ennemie, écoute et éventuel ping ennemi, décision et déplacement des navires, suivi Sonar joueur, puis torpilles/impacts et alertes. Une alerte d'impact est donc exploitée au tick suivant. Les erreurs de mesure dérivent de la graine et du tick, sans horloge murale.
+
+Le protocole v7, incompatible v6, ajoute `MissionConfig::escort` (`EscortConfig`, données légères uniquement) et `GameEvent::SonarPingHeard { bearing, bearing_uncertainty }`. La réception d'une émission et la production d'un écho ennemi sont indépendantes. L'événement public ne contient ni identité, ni position exacte, ni succès de détection ; le serveur le filtre vers Capitaine/Sonar seulement. Les deux postes affichent les trois derniers pings depuis l'historique client borné à 64 événements. Aucun état de l'IA ni sa piste privée ne traverse le réseau ; aucune nouvelle commande joueur n'est introduite.
 
 **Composants cibles :**
 

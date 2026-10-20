@@ -191,7 +191,8 @@ make build-wasm
 - [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v6 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, accusés et ticks numérotés
+- [x] Protocole v7 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, pings entendus, accusés et ticks numérotés
+- [x] Recherche acoustique de l'escorte, sonar actif ennemi et retour au convoi après perte de contact (M5.1, sans riposte armée)
 - [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
 - [x] Convoi, observations, pistes incertaines et poste Sonar tactile (M3)
 - [x] Tubes, solution de tir, autorisation, torpilles et impacts simulés (M4)

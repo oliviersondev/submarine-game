@@ -1,4 +1,5 @@
 mod detection;
+mod enemy_ai;
 mod tracks;
 mod weapons;
 mod world;
@@ -93,7 +94,12 @@ impl Simulation {
         self.update_resources(dt);
         self.update_acoustic_signature();
         self.sanitize_state();
-        self.world.update(dt);
+        let mut events = self.world.update(
+            dt,
+            &self.state,
+            self.tick.wrapping_add(1),
+            self.config.escort,
+        );
         self.ping_cooldown_remaining = (self.ping_cooldown_remaining - dt).max(0.0);
         self.tick = self.tick.wrapping_add(1);
         self.tracker.update(self.tick, &self.state, dt);
@@ -107,9 +113,12 @@ impl Simulation {
             );
             self.record_observations(observations);
         }
-        let mut events = self
-            .weapons
-            .update(dt, &mut self.world, self.config.weapons, &self.state);
+        events.extend(self.weapons.update(
+            dt,
+            &mut self.world,
+            self.config.weapons,
+            &self.state,
+        ));
         events.extend(self.update_alerts());
         events
     }
@@ -189,7 +198,8 @@ impl Simulation {
                     &mut self.next_observation_id,
                 );
                 self.record_observations(observations);
-                self.world.observe_active_ping(&self.state, self.tick);
+                self.world
+                    .observe_active_ping(&self.state, self.tick, self.config.escort);
             }
             PlayerCommand::MergeTracks { primary, secondary } => {
                 self.tracker.merge(primary, secondary)?;
@@ -764,6 +774,28 @@ mod tests {
         assert_eq!(first.world, second.world);
         assert_eq!(first.sonar_measurements(), second.sonar_measurements());
         assert_eq!(first.world.vessels.len(), 3);
+    }
+
+    #[test]
+    fn escort_search_and_audible_events_replay_with_the_same_commands() {
+        let mut first = submerged_simulation(0.0);
+        let mut second = submerged_simulation(0.0);
+        let mut heard_ping = false;
+        for tick in 0..4_000 {
+            if tick == 0 || tick == 200 {
+                assert_eq!(
+                    first.apply_command(PlayerCommand::SonarPing),
+                    second.apply_command(PlayerCommand::SonarPing)
+                );
+            }
+            let events = first.tick(0.05);
+            assert_eq!(events, second.tick(0.05));
+            heard_ping |= events.iter().any(|e| matches!(e, GameEvent::SonarPingHeard { .. }));
+            assert_eq!(first.world, second.world);
+            assert_eq!(first.sonar_measurements(), second.sonar_measurements());
+        }
+        assert!(heard_ping);
+        assert_eq!(first.world.escort_ai.phase, enemy_ai::Phase::Escort);
     }
 
     #[test]

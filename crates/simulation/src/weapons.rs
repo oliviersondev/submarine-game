@@ -718,7 +718,7 @@ mod tests {
         }
         let mut events = vec![];
         for _ in 0..9000 {
-            world.update(0.05);
+            world.update(0.05, &state, 0, shared::EscortConfig::default());
             events.extend(weapons.update(0.05, &mut world, config, &state));
         }
         (events, world)
