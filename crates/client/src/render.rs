@@ -1,5 +1,6 @@
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+use bevy::ui::RelativeCursorPosition;
 use bevy::window::PrimaryWindow;
 use shared::{
     AlertKind, BallastState, ContactClassification, CrewRole, EngineeringMeasurements,
@@ -83,10 +84,19 @@ struct TacticalPanel;
 struct StationBody;
 
 #[derive(Component)]
+struct SonarBody;
+
+#[derive(Component)]
 struct SonarSummary;
 
 #[derive(Component)]
 struct ObservationList;
+
+#[derive(Component)]
+struct SonarPingJournal;
+
+#[derive(Component)]
+struct SonarObservationLog;
 
 #[derive(Component)]
 struct SonarTrackSlot(usize);
@@ -675,6 +685,10 @@ fn compact_landscape(width: f32, height: f32) -> bool {
     width >= 600.0 && height <= 500.0
 }
 
+fn sonar_two_columns(width: f32, height: f32) -> bool {
+    width >= 900.0 || compact_landscape(width, height)
+}
+
 fn update_station_layout(
     window: Single<&Window, With<PrimaryWindow>>,
     mut nodes: Query<
@@ -686,6 +700,7 @@ fn update_station_layout(
             Option<&SonarPanel>,
             Option<&TacticalPanel>,
             Option<&StationBody>,
+            Option<&SonarBody>,
         ),
         Or<(
             With<HudPanel>,
@@ -701,7 +716,7 @@ fn update_station_layout(
     let landscape = compact_landscape(window.width(), window.height());
     hud_text.font_size = FontSize::Px(if landscape { 13.0 } else { 17.0 });
 
-    for (mut node, hud, pilot, engineer, sonar, tactical, body) in &mut nodes {
+    for (mut node, hud, pilot, engineer, sonar, tactical, body, sonar_body) in &mut nodes {
         if hud.is_some() {
             node.left = px(16);
             node.top = px(16);
@@ -717,13 +732,18 @@ fn update_station_layout(
                 node.max_width = px(520);
             }
         } else if body.is_some() {
-            node.flex_direction = if landscape {
+            let columns = if sonar_body.is_some() {
+                sonar_two_columns(window.width(), window.height())
+            } else {
+                landscape
+            };
+            node.flex_direction = if columns {
                 FlexDirection::Row
             } else {
                 FlexDirection::Column
             };
-            node.column_gap = px(if landscape { 8 } else { 0 });
-            node.row_gap = px(if landscape { 0 } else { 6 });
+            node.column_gap = px(if columns { 8 } else { 0 });
+            node.row_gap = px(if columns { 0 } else { 6 });
         } else if pilot.is_some() || engineer.is_some() || sonar.is_some() || tactical.is_some() {
             node.right = px(16);
             node.bottom = px(16);
@@ -998,14 +1018,20 @@ fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.95, 1.0)),
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
             ));
             panel
                 .spawn((
                     StationBody,
+                    SonarBody,
                     Node {
                         width: percent(100),
                         flex_grow: 1.0,
                         min_height: px(0),
+                        overflow: Overflow::clip(),
                         flex_direction: FlexDirection::Column,
                         row_gap: px(6),
                         ..default()
@@ -1016,6 +1042,8 @@ fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
                         flex_basis: px(0),
                         flex_grow: 1.0,
                         min_width: px(150),
+                        min_height: px(284),
+                        overflow: Overflow::clip(),
                         flex_direction: FlexDirection::Column,
                         row_gap: px(4),
                         ..default()
@@ -1029,9 +1057,64 @@ fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
                                 ..default()
                             },
                             TextColor(Color::srgb(0.72, 0.9, 0.94)),
+                            Node {
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
                         ));
                         spawn_polar_map(left, false);
                         left.spawn((
+                            SonarPingJournal,
+                            Text::new("PINGS ENTENDUS // AUCUN"),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.62, 0.82, 0.86)),
+                            Node {
+                                height: px(56),
+                                flex_shrink: 0.0,
+                                overflow: Overflow::clip(),
+                                ..default()
+                            },
+                        ));
+                        left.spawn((
+                            SonarObservationLog,
+                            SonarTrackScrollStart(Vec2::ZERO),
+                            ScrollPosition(Vec2::ZERO),
+                            RelativeCursorPosition::default(),
+                            Node {
+                                height: px(64),
+                                flex_shrink: 0.0,
+                                flex_direction: FlexDirection::Column,
+                                overflow: Overflow::scroll_y(),
+                                scrollbar_width: 6.0,
+                                ..default()
+                            },
+                        ))
+                        .observe(
+                            |drag: On<Pointer<Drag>>,
+                             ui_scale: Res<UiScale>,
+                             mut log: Single<
+                                (&ComputedNode, &mut ScrollPosition, &SonarTrackScrollStart),
+                                With<SonarObservationLog>,
+                             >| {
+                                let range = (log.0.content_size.y - log.0.size.y).max(0.0)
+                                    * log.0.inverse_scale_factor;
+                                log.1 .0.y = (log.2 .0.y - drag.distance.y / ui_scale.0)
+                                    .clamp(0.0, range);
+                             },
+                        )
+                        .observe(
+                            |_: On<Pointer<DragStart>>,
+                             mut log: Single<
+                                (&ComputedNode, &mut SonarTrackScrollStart),
+                                With<SonarObservationLog>,
+                             >| {
+                                log.1 .0 = log.0.scroll_position * log.0.inverse_scale_factor;
+                             },
+                        )
+                        .with_child((
                             ObservationList,
                             Text::new("OBSERVATIONS // AUCUNE"),
                             TextFont {
@@ -1040,7 +1123,7 @@ fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
                             },
                             TextColor(Color::srgb(0.62, 0.82, 0.86)),
                             Node {
-                                min_height: px(34),
+                                flex_shrink: 0.0,
                                 ..default()
                             },
                         ));
@@ -1050,6 +1133,7 @@ fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
                         flex_grow: 1.0,
                         min_height: px(0),
                         min_width: px(174),
+                        overflow: Overflow::clip(),
                         flex_direction: FlexDirection::Column,
                         row_gap: px(4),
                         ..default()
@@ -1062,12 +1146,17 @@ fn spawn_sonar_station(commands: &mut Commands, player: &LocalPlayer) {
                                 ..default()
                             },
                             TextColor(Color::srgb(0.55, 0.78, 0.82)),
+                            Node {
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
                         ));
                         right
                             .spawn((
                                 SonarTrackList,
                                 SonarTrackScrollStart(Vec2::ZERO),
                                 ScrollPosition(Vec2::ZERO),
+                                RelativeCursorPosition::default(),
                                 Node {
                                     width: percent(100),
                                     flex_basis: px(0),
@@ -1259,15 +1348,22 @@ fn touch_button_node() -> Node {
 
 fn scroll_sonar_tracks(
     mut wheel_events: MessageReader<MouseWheel>,
-    mut list: Single<(&ComputedNode, &mut ScrollPosition), With<SonarTrackList>>,
+    mut lists: Query<
+        (&ComputedNode, &mut ScrollPosition, &RelativeCursorPosition),
+        Or<(With<SonarTrackList>, With<SonarObservationLog>)>,
+    >,
 ) {
-    let range = (list.0.content_size.y - list.0.size.y).max(0.0) * list.0.inverse_scale_factor;
     for event in wheel_events.read() {
         let delta = match event.unit {
             MouseScrollUnit::Line => event.y * 44.0,
             MouseScrollUnit::Pixel => event.y,
         };
-        list.1 .0.y = (list.1 .0.y - delta).clamp(0.0, range);
+        for (node, mut position, cursor) in &mut lists {
+            if cursor.cursor_over() {
+                let range = (node.content_size.y - node.size.y).max(0.0) * node.inverse_scale_factor;
+                position.0.y = (position.0.y - delta).clamp(0.0, range);
+            }
+        }
     }
 }
 
@@ -1613,6 +1709,7 @@ fn update_sonar_station(
             Without<ObservationList>,
             Without<SonarTrackSlot>,
             Without<SonarAction>,
+            Without<SonarPingJournal>,
         ),
     >,
     mut observations: Single<
@@ -1620,6 +1717,17 @@ fn update_sonar_station(
         (
             With<ObservationList>,
             Without<SonarSummary>,
+            Without<SonarTrackSlot>,
+            Without<SonarAction>,
+            Without<SonarPingJournal>,
+        ),
+    >,
+    mut pings: Single<
+        &mut Text,
+        (
+            With<SonarPingJournal>,
+            Without<SonarSummary>,
+            Without<ObservationList>,
             Without<SonarTrackSlot>,
             Without<SonarAction>,
         ),
@@ -1636,6 +1744,7 @@ fn update_sonar_station(
             Without<SonarAction>,
             Without<SonarSummary>,
             Without<ObservationList>,
+            Without<SonarPingJournal>,
         ),
     >,
     mut actions: Query<
@@ -1644,6 +1753,7 @@ fn update_sonar_station(
             Without<SonarTrackSlot>,
             Without<SonarSummary>,
             Without<ObservationList>,
+            Without<SonarPingJournal>,
         ),
     >,
 ) {
@@ -1661,10 +1771,12 @@ fn update_sonar_station(
         }
     );
     observations.0 = observation_list(&sonar.observations);
-    let pings = ping_journal(&state);
-    if !pings.is_empty() {
-        observations.0 = format!("{pings}\n{}", observations.0);
-    }
+    let journal = ping_journal(&state);
+    pings.0 = if journal.is_empty() {
+        "PINGS ENTENDUS // AUCUN".to_owned()
+    } else {
+        journal
+    };
 
     for (slot, mut text, mut visibility, mut background, mut border) in &mut slots {
         let Some(track) = sonar.tracks.get(slot.0) else {
@@ -1915,7 +2027,7 @@ fn observation_list(observations: &[SonarObservation]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!("DERNIERES OBSERVATIONS\n{lines}")
+    format!("OBSERVATIONS // DEFILER\n{lines}")
 }
 
 fn track_line(track: &TrackEstimate, server_tick: u64) -> String {
@@ -2685,6 +2797,72 @@ mod tests {
         assert!(compact_landscape(600.0, 500.0));
         assert!(!compact_landscape(599.0, 500.0));
         assert!(!compact_landscape(600.0, 501.0));
+    }
+
+    #[test]
+    fn sonar_uses_two_columns_on_desktop_and_phone_landscape_only() {
+        assert!(sonar_two_columns(1859.0, 874.0));
+        assert!(sonar_two_columns(1280.0, 720.0));
+        assert!(sonar_two_columns(640.0, 360.0));
+        assert!(!sonar_two_columns(360.0, 640.0));
+        assert!(!sonar_two_columns(800.0, 1000.0));
+    }
+
+    #[test]
+    fn sonar_pings_use_a_separate_bounded_chronological_journal() {
+        let mut state = GameState::default();
+        assert!(ping_journal(&state).is_empty());
+        for tick in 1..=5 {
+            state.events.push_back((
+                tick,
+                shared::GameEvent::SonarPingHeard {
+                    bearing: tick as f32,
+                    bearing_uncertainty: 3.0,
+                },
+            ));
+            state.events.push_back((
+                tick,
+                shared::GameEvent::TorpedoFired { bearing: 0.0 },
+            ));
+        }
+        let journal = ping_journal(&state);
+        let lines: Vec<_> = journal.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines[1].starts_with("[t3]"));
+        assert!(lines[2].starts_with("[t4]"));
+        assert!(lines[3].starts_with("[t5]"));
+        assert!(!journal.contains("OBSERVATIONS"));
+    }
+
+    #[test]
+    fn sonar_text_queries_remain_disjoint_and_journals_do_not_merge() {
+        let mut app = App::new();
+        app.init_resource::<SonarUiState>()
+            .insert_resource(GameState {
+                sonar: Some(shared::SonarMeasurements {
+                    observations: vec![],
+                    tracks: vec![],
+                    own_noise: 0.0,
+                    ping_cooldown_remaining: 0.0,
+                }),
+                ..default()
+            })
+            .add_systems(Startup, |mut commands: Commands| {
+                spawn_sonar_station(&mut commands, &LocalPlayer::default());
+            })
+            .add_systems(Update, update_sonar_station);
+        app.update();
+        let world = app.world_mut();
+        let mut observations = world.query_filtered::<&Text, With<ObservationList>>();
+        assert_eq!(
+            observations.single(world).unwrap().0,
+            "OBSERVATIONS // AUCUNE"
+        );
+        let mut pings = world.query_filtered::<(&Text, &Node), With<SonarPingJournal>>();
+        let (text, node) = pings.single(world).unwrap();
+        assert_eq!(text.0, "PINGS ENTENDUS // AUCUN");
+        assert_eq!(node.height, px(56));
+        assert_eq!(node.flex_shrink, 0.0);
     }
 
     #[test]
