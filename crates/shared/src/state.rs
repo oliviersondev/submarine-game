@@ -324,4 +324,105 @@ pub struct MissionSnapshot {
     pub submarine: SubmarineSnapshot,
     pub sonar: Option<SonarMeasurements>,
     pub tactical: Option<TacticalMeasurements>,
+    pub weapons: Option<WeaponsMeasurements>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TubePhase {
+    Empty,
+    Loading,
+    Loaded,
+    Flooding,
+    Flooded,
+    Opening,
+    Ready,
+    Closing,
+    Purging,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ShotSettings {
+    pub target: TrackId,
+    pub depth: f32,
+    pub heading_correction: f32,
+    pub speed_correction: f32,
+}
+
+impl ShotSettings {
+    pub fn for_target(target: TrackId) -> Self {
+        Self {
+            target,
+            depth: 4.0,
+            heading_correction: 0.0,
+            speed_correction: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TubeMeasurements {
+    pub phase: TubePhase,
+    pub loaded: bool,
+    pub remaining_seconds: f32,
+    pub settings: Option<ShotSettings>,
+    pub authorized: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FiringSolution {
+    pub bearing: f32,
+    pub run_seconds: f32,
+    pub uncertainty_meters: f32,
+    pub warnings: Vec<String>,
+    pub launch_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TorpedoMeasurements {
+    pub id: u64,
+    pub x: f32,
+    pub y: f32,
+    pub depth: f32,
+    pub bearing: f32,
+    pub remaining_meters: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeaponsMeasurements {
+    pub tubes: Vec<TubeMeasurements>,
+    pub reserve: u8,
+    pub solutions: Vec<Option<FiringSolution>>,
+    pub solution_errors: Vec<Option<crate::ProtocolError>>,
+    pub torpedoes: Vec<TorpedoMeasurements>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WeaponsConfig {
+    pub load_seconds: f32,
+    pub flood_seconds: f32,
+    pub door_seconds: f32,
+    pub purge_seconds: f32,
+    pub torpedo_speed_knots: f32,
+    pub torpedo_range_meters: f32,
+    pub damage: f32,
+    pub collision_radius_meters: f32,
+    pub max_launch_depth: f32,
+    pub max_surface_impact_depth: f32,
+}
+
+impl Default for WeaponsConfig {
+    fn default() -> Self {
+        Self {
+            load_seconds: 20.0,
+            flood_seconds: 8.0,
+            door_seconds: 3.0,
+            purge_seconds: 8.0,
+            torpedo_speed_knots: 40.0,
+            torpedo_range_meters: 8000.0,
+            damage: 100.0,
+            collision_radius_meters: 35.0,
+            max_launch_depth: 20.0,
+            max_surface_impact_depth: 8.0,
+        }
+    }
 }

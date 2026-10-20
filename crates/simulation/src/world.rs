@@ -15,10 +15,14 @@ pub(crate) struct Vessel {
     pub(crate) heading: f32,
     pub(crate) speed: f32,
     pub(crate) signature: f32,
+    integrity: f32,
     kind: VesselKind,
 }
 
 impl Vessel {
+    pub(crate) fn afloat(&self) -> bool {
+        self.integrity > 0.0
+    }
     pub(crate) fn profile(&self) -> AcousticProfile {
         match self.kind {
             VesselKind::Cargo => AcousticProfile::LowFrequency,
@@ -59,6 +63,9 @@ impl World {
 
     pub(crate) fn update(&mut self, dt: f32) {
         for vessel in &mut self.vessels {
+            if vessel.integrity <= 0.0 {
+                continue;
+            }
             let distance = vessel.speed * KNOTS_TO_METERS_PER_SECOND * dt;
             let heading = vessel.heading.to_radians();
             vessel.x += heading.sin() * distance;
@@ -81,6 +88,48 @@ impl World {
         });
     }
 
+    pub(crate) fn impact(
+        &mut self,
+        ax: f32,
+        ay: f32,
+        bx: f32,
+        by: f32,
+        depth: f32,
+        config: shared::WeaponsConfig,
+    ) -> Option<bool> {
+        if depth > config.max_surface_impact_depth {
+            return None;
+        }
+        let dx = bx - ax;
+        let dy = by - ay;
+        let length = dx * dx + dy * dy;
+        let hit = self.vessels.iter().position(|v| {
+            if v.integrity <= 0.0 {
+                return false;
+            }
+            let t = if length > 0.0 {
+                (((v.x - ax) * dx + (v.y - ay) * dy) / length).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (v.x - ax - t * dx).hypot(v.y - ay - t * dy) <= config.collision_radius_meters
+        })?;
+        self.vessels[hit].integrity = (self.vessels[hit].integrity - config.damage).max(0.0);
+        let sunk = self.vessels[hit].integrity == 0.0;
+        if sunk {
+            self.vessels[hit].signature = 0.0;
+            self.vessels[hit].speed = 0.0;
+        }
+        // Les bâtiments voisins observent l'explosion, sans connaître le tireur.
+        let (x, y) = (self.vessels[hit].x, self.vessels[hit].y);
+        for vessel in &mut self.vessels {
+            if vessel.integrity > 0.0 && (vessel.x - x).hypot(vessel.y - y) < 3000.0 {
+                vessel.heading = (vessel.heading + 35.0).rem_euclid(360.0);
+            }
+        }
+        Some(sunk)
+    }
+
     #[cfg(test)]
     pub(crate) fn enemy_track(&self) -> Option<(f32, f32, f32, u64)> {
         self.escort_track
@@ -99,6 +148,7 @@ fn vessel(kind: VesselKind, x: f32, y: f32, heading: f32, speed: f32) -> Vessel 
             VesselKind::Cargo => 82.0,
             VesselKind::Escort => 72.0,
         },
+        integrity: 100.0,
         kind,
     }
 }

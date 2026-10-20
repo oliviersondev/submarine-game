@@ -111,11 +111,11 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
 | Navigation | consignes et valeurs réelles, inertie, plongée, ballasts et remontée d'urgence | assiette, stabilité et effets des avaries |
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
-| Armement | événement de tir immédiat | tubes, solution de tir et entités torpilles |
+| Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
 | Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation et recharge | distribution détaillée, compartiments, avaries et réparations temporisées |
-| IA | bots Pilote/Ingénierie minimaux, partage automatique du bot Sonar et route de convoi | bots de poste complets et comportement tactique ennemi |
-| Client | lobby et postes tactiles Pilote, Ingénierie, Sonar, plus carte Capitaine/Armement | interfaces Armement complètes et état de reconnexion |
-| Protocole | version 3, identifiants opaques, observations et pistes projetées par rôle | reprise et négociation de compatibilité |
+| IA | bots Pilote/Ingénierie minimaux, partage du bot Sonar, préparation Armement sur ordre et autorisation Capitaine | bots de poste complets et comportement tactique ennemi |
+| Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
+| Protocole | version 6, identifiants opaques, projections par rôle, diagnostics d'armement et accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -163,7 +163,13 @@ C4Container
 
 ### 5.3 Crate `simulation`
 
-**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil, convoi déterministe, détection passive/active, pistes incertaines et automatisation minimale des bots Ingénierie et Sonar.
+**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil, convoi déterministe, détection passive/active, pistes incertaines et automatisation minimale des bots Ingénierie et Sonar. `weapons.rs` possède les tubes, autorisations, solutions calculées exclusivement depuis les estimations partagées et courses de torpilles. `world.rs` applique les collisions, l'intégrité et les manœuvres privées du convoi. `WeaponsConfig` centralise les paramètres d'équilibrage transmis avec la mission.
+
+Les mesures d'armement sont projetées uniquement vers le Capitaine et l'Armement. Les événements d'explosion observée et de fin de course estimée sont limités au Capitaine, à l'Armement et au Sonar. Une collision hors portée d'écoute ne raccourcit pas la course estimée envoyée au client : son résultat réel ne traverse pas la frontière réseau. L'intégrité, l'identité et la position réelle des navires restent dans le monde privé.
+
+Le protocole v5 a ajouté `WeaponsMeasurements::solution_errors`, aligné sur les tubes et les solutions. La simulation distingue les données de piste manquantes, une piste perdue/non partagée, l'absence d'interception et l'autonomie insuffisante. Une solution calculable hors secteur conserve sa direction et ses avertissements, mais interdit le lancement ; un tir hors secteur reçoit une erreur distincte. Ces diagnostics n'utilisent que la piste partagée et la configuration du tir, sans information ennemie cachée. Le client distingue sélection locale, configuration appliquée, état courant et résultat de la dernière commande.
+
+Le protocole v6 ajoute `TubeMeasurements::loaded`, `WeaponsConfig::max_surface_impact_depth` et des refus explicites pour profondeur incompatible et autorisation portant sur des réglages périmés. Les vitesses égales sont désormais traitées par le calcul linéaire d'interception, sans erreur spéciale. Les consignes bot en attente restent privées à la simulation et passent par `ConfigureShot` après chargement. Les événements de lancement avec relèvement, d'explosion et de fin de course sont réservés à Capitaine/Armement/Sonar. Le client conserve les 64 derniers événements avec leur tick ; le poste Armement affiche les six derniers événements d'armement dans l'ordre chronologique, sans écrasement des événements reçus dans un même lot réseau.
 
 **Composants cibles :**
 
@@ -202,6 +208,8 @@ Une salle possède une seule file séquentielle de commandes. Un client lent ne 
 ### 5.5 Crate `client`
 
 **Existant :** connexion `ewebsock` en ressource `NonSend`, URL dérivée de l'origine, création/rejoint de salle, sélection de rôle, lobby minimal, interpolation, postes tactiles Pilote, Ingénierie et Sonar, carte tactique Capitaine/Armement et ordre du capitaine au bot Pilote.
+
+`weapons_ui.rs` ajoute les sélections de piste/tube, les réglages et procédures de préparation, l'ordre au bot Armement, l'autorisation du Capitaine et la confirmation distincte avant le tir. Les réponses `CommandAccepted { command_id }` et `Error { command_id, error }` sont envoyées uniquement à l'émetteur ; les snapshots confirment l'état effectif des tubes.
 
 **Composants cibles :**
 
@@ -399,7 +407,7 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | TD-01 | URL WebSocket locale codée en dur | résolu en M1 | URL dérivée de l'origine et configuration native `WS_URL` |
 | TD-02 | lobby global et démarrage à cinq joueurs | résolu en M1 | registre en mémoire, prêts, démarrage explicite et bots |
 | TD-03 | protocole non versionné | résolu en M1, évolué en M2 | version 2 et fixtures exactes `postcard` |
-| TD-04 | commandes sonar, réparation et tir principalement symboliques | jeu non fonctionnel | remplacer par vertical slices de domaine |
+| TD-04 | réparation encore symbolique et riposte d'escorte absente | boucle de survie incomplète | implémenter M5 |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
 
 ## 12. Glossaire

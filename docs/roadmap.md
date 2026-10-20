@@ -29,8 +29,9 @@ Le dépôt fournit déjà :
 - navigation inertielle, plongée, endurance, bruit et interpolation du rendu ;
 - convoi déterministe, écoute passive et active, pistes incertaines et classification progressive ;
 - interfaces tactiles Pilote, Ingénierie, Sonar et carte tactique du Capitaine.
+- procédure tactile d'armement, autorisation du Capitaine, torpilles simulées et dégâts aux navires.
 
-L'armement, les réparations et la réaction tactique de l'escorte sont encore symboliques. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
+Les réparations et la recherche/attaque tactique de l'escorte sont encore symboliques. Le convoi change simplement de route aux impacts proches. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
 
 ## 3. Vue d'ensemble
 
@@ -230,6 +231,16 @@ M3 est livré sous forme minimale avec un protocole v3 sans compatibilité v2. L
 ### Critère de validation
 
 Une torpille préparée à partir d'une piste stable peut toucher un cargo ; un tir précipité peut le manquer pour une raison explicable.
+
+### État implémenté au 30 septembre 2026
+
+M4 est livré sous forme minimale avec un protocole v4 sans compatibilité v3 : cinq tubes, cinq torpilles, chargement et opérations de porte/inondation/purge temporisés et bruyants, solution automatique depuis les seules pistes partagées avec corrections manuelles, autorisation du Capitaine liée à la configuration et confirmation tactile du tir par l'Armement. Les torpilles non guidées possèdent une course limitée et une profondeur simulée ; les collisions de trajectoire appliquent des dégâts configurables à une intégrité ennemie privée et provoquent une manœuvre des bâtiments proches. Les bots préparent sur ordre et attendent l'autorisation ; un bot Capitaine peut désigner une piste marchande fiable lorsque l'Armement est aussi vacant. Les commandes acceptées sont accusées avec leur identifiant. Les postes Capitaine/Armement affichent uniquement les tubes, solutions et courses propres estimées ; les explosions ne sont annoncées qu'à portée d'écoute et ne confirment pas l'état réel d'une cible.
+
+Les tests couvrent procédures interdites, stock/délais, permissions, autorisations invalidées, interception, relèvement erroné, changement de route, dégâts, rejeu et impact caché. La compilation WASM est vérifiée ; les essais sur téléphone réel et l'équilibrage des valeurs provisoires restent à réaliser. Le modèle de collision des navires de surface est simplifié ; les avaries détaillées et la riposte restent en M5.
+
+Amélioration de prise en main : le protocole v5 expose les causes précises de solution indisponible. Le poste distingue explicitement sélection et réglages locaux de la configuration appliquée au tube, signale une piste perdue, indique la prochaine étape et différencie les anciens refus du blocage actuel. Les modifications locales non appliquées suspendent le tir jusqu'à configuration ou retour aux réglages appliqués.
+
+Corrections de revue M4 (protocole v6) : limite de profondeur commune à la validation et aux impacts, refus précis des autorisations périmées, consignes bot sérialisées sur un seul tube et configurées après chargement, suivi indépendant des munitions, résolution des vitesses égales/proches, filtrage des événements de lancement, historique client borné et accès défensifs aux snapshots d'armement. Les régressions couvrent aussi les torpilles simultanées et les purges avec ou sans munition restante.
 
 ## 9. M5 - Escorte, attaque et contrôle des avaries
 

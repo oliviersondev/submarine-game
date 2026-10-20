@@ -326,6 +326,14 @@ Les erreurs possibles proviennent notamment de :
 
 Une torpille existe comme entité simulée après son lancement. Elle possède une position, une profondeur, un cap, une vitesse, une autonomie et un état. Un impact est déterminé par la simulation, pas par un événement immédiat au moment du tir.
 
+**Règles M4 retenues :** solution automatique depuis une piste partagée, avec corrections manuelles du cap cible (±45°) et de sa vitesse (±10 nœuds). Le Capitaine autorise un tube et sa configuration (piste, profondeur et corrections) ; l'Armement déclenche après une confirmation tactile distincte. Une reconfiguration, une fermeture ou une purge annule l'autorisation. Une piste absente ou non partagée interdit le lancement. Le bot Capitaine autorise les solutions disponibles ; lorsque l'Armement est également vacant, il donne un ordre de préparation sur une piste marchande partagée de confiance au moins 70 %. Le bot Armement prépare uniquement sur ordre et attend l'autorisation avant de lancer.
+
+Une seule torpille non guidée est disponible en M4 : cap fixe calculé au lancement, vitesse de 40 nœuds, autonomie de 8 000 m, profondeur configurée entre 1 et 8 m par défaut et convergence verticale de 1,5 m/s depuis la profondeur du sous-marin. La profondeur configurée ne peut pas dépasser la zone d'impact des navires de surface : le même paramètre `WeaponsConfig::max_surface_impact_depth` (8 m par défaut) contrôle validation et collisions, avec un plafond technique de réglage de 15 m. Un réglage trop profond est refusé avant le tir. Le lancement exige une profondeur du sous-marin ≤20 m et une solution à ±90° de l'axe du tube (avant ou arrière). Le rayon de collision simplifié est de 35 m. Une torpille lancée en profondeur doit encore remonter vers sa consigne avant de pouvoir toucher une coque.
+
+Le calcul traite les vitesses cible/torpille égales ou très proches par une équation linéaire, avec un seuil relatif à la vitesse de la torpille. Une cible approchant à la même vitesse peut être interceptée ; une cible qui s'éloigne à cette vitesse ne peut pas être rattrapée. La limite de portée s'applique aussi à ce cas.
+
+L'interface expose la confiance de piste, l'incertitude spatiale et les sources d'instabilité, sans pourcentage de réussite. Elle suit la course estimée des torpilles propres. Une explosion à moins de 6 000 m est observable, sans révéler la position, l'identité ou l'intégrité de la cible ; au-delà, la course estimée reste affichée jusqu'à épuisement prévu de l'autonomie.
+
 ### 6.8 Tubes et munitions
 
 Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torpilles prêtes ou en réserve. La séquence normale est :
@@ -339,6 +347,12 @@ Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torp
 7. recharger si une munition est disponible.
 
 Certaines étapes peuvent être automatisées par un ordre, mais leur durée, leur bruit et leurs conditions restent simulés.
+
+**Équilibrage M4 provisoire :** cinq tubes initialement vides et cinq torpilles en réserve ; chargement 20 s, inondation 8 s, ouverture/fermeture 3 s, purge 8 s. Le stock est réservé dès le début du chargement. La fermeture après lancement est automatique ; une purge est nécessaire avant rechargement. Purger un tube encore chargé conserve sa torpille. Chaque opération temporisée ajoute 8 points à la signature acoustique. Les paramètres principaux sont centralisés dans `WeaponsConfig`.
+
+La présence d'une munition est indépendante de la configuration du tube : un tube vidé par un lancement ne peut pas être reconfiguré pour créer une nouvelle torpille. Une autorisation portant sur une configuration périmée est refusée avec un diagnostic distinct. Un nouvel ordre au bot Armement remplace la consigne du tube déjà pris en charge, sans affecter une seconde munition ; le bot attend la fin du chargement avant de configurer par la même procédure qu'un humain. Après perte d'une piste, il referme et purge si nécessaire, puis rend disponible le tube encore chargé. Pendant la fermeture/purge d'un tube vidé par un tir, attendre la fin de remise en état avant un nouvel ordre.
+
+Les bâtiments ennemis disposent d'une intégrité privée initiale de 100. Les dégâts par torpille sont configurables (100 par défaut) ; à zéro, le bâtiment coule, cesse de naviguer et ne produit plus d'observation sonar. Les navires survivants à moins de 3 000 m d'un impact observé changent leur route de 35°. La recherche et la riposte tactiques de l'escorte restent prévues en M5.
 
 ### 6.9 Dégâts et avaries
 

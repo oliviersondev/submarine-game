@@ -1,5 +1,6 @@
 mod detection;
 mod tracks;
+mod weapons;
 mod world;
 
 use shared::{
@@ -15,8 +16,9 @@ const KNOTS_TO_METERS_PER_SECOND: f32 = 0.514_444;
 const PASSIVE_INTERVAL_TICKS: u64 = 20;
 const PING_COOLDOWN_SECONDS: f32 = 8.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SimulationError {
+    Weapons(ProtocolError),
     TrackNotFound(TrackId),
     InvalidTrackMerge,
     SonarPingCoolingDown,
@@ -34,6 +36,7 @@ impl From<TrackError> for SimulationError {
 impl From<SimulationError> for ProtocolError {
     fn from(error: SimulationError) -> Self {
         match error {
+            SimulationError::Weapons(error) => error,
             SimulationError::TrackNotFound(id) => Self::TrackNotFound(id),
             SimulationError::InvalidTrackMerge => Self::InvalidTrackMerge,
             SimulationError::SonarPingCoolingDown => Self::SonarPingCoolingDown,
@@ -51,6 +54,7 @@ pub struct Simulation {
     observations: Vec<SonarObservation>,
     next_observation_id: u64,
     ping_cooldown_remaining: f32,
+    weapons: weapons::Weapons,
 }
 
 impl Simulation {
@@ -69,6 +73,7 @@ impl Simulation {
             observations: Vec::new(),
             next_observation_id: 0,
             ping_cooldown_remaining: 0.0,
+            weapons: weapons::Weapons::new(),
         }
     }
 
@@ -102,7 +107,11 @@ impl Simulation {
             );
             self.record_observations(observations);
         }
-        self.update_alerts()
+        let mut events = self
+            .weapons
+            .update(dt, &mut self.world, self.config.weapons, &self.state);
+        events.extend(self.update_alerts());
+        events
     }
 
     pub fn apply_command(
@@ -145,10 +154,24 @@ impl Simulation {
             PlayerCommand::SetBatteryCharging(enabled) => {
                 self.state.propulsion.charging = enabled;
             }
-            PlayerCommand::FireTorpedo { bearing } if bearing.is_finite() => {
-                return Ok(vec![GameEvent::TorpedoFired {
-                    bearing: bearing.rem_euclid(360.0),
-                }]);
+            command @ (PlayerCommand::FireTorpedo { .. }
+            | PlayerCommand::LoadTube(_)
+            | PlayerCommand::ConfigureShot { .. }
+            | PlayerCommand::FloodTube(_)
+            | PlayerCommand::OpenTube(_)
+            | PlayerCommand::CloseTube(_)
+            | PlayerCommand::PurgeTube(_)
+            | PlayerCommand::AuthorizeShot { .. }
+            | PlayerCommand::OrderWeaponsBot { .. }) => {
+                return self
+                    .weapons
+                    .apply(
+                        command,
+                        &self.state,
+                        &self.tracker.shared_estimates(),
+                        self.config.weapons,
+                    )
+                    .map_err(SimulationError::Weapons);
             }
             PlayerCommand::RepairSystem(id) => {
                 return Ok(vec![GameEvent::SystemRepaired(id)]);
@@ -232,6 +255,50 @@ impl Simulation {
             own_noise: self.state.acoustic_signature,
             ping_cooldown_remaining: self.ping_cooldown_remaining,
         }
+    }
+
+    pub fn weapons_measurements(&self) -> shared::WeaponsMeasurements {
+        self.weapons.measurements(
+            &self.state,
+            &self.tracker.shared_estimates(),
+            self.config.weapons,
+        )
+    }
+
+    pub fn automate_weapons(&mut self, weapons_bot: bool, captain_bot: bool) -> Vec<GameEvent> {
+        let tracks = self.tracker.shared_estimates();
+        if weapons_bot && captain_bot && self.weapons.needs_bot_order() {
+            if let Some(track) = tracks
+                .iter()
+                .filter(|t| {
+                    t.confidence >= 70.0
+                        && t.classification == shared::ContactClassification::Merchant
+                })
+                .find(|t| {
+                    weapons::solution(
+                        &self.state,
+                        &tracks,
+                        shared::ShotSettings::for_target(t.id),
+                        self.config.weapons,
+                    )
+                    .is_ok()
+                })
+            {
+                let _ = self.weapons.apply(
+                    PlayerCommand::OrderWeaponsBot { target: track.id },
+                    &self.state,
+                    &tracks,
+                    self.config.weapons,
+                );
+            }
+        }
+        self.weapons.automate(
+            &self.state,
+            &tracks,
+            self.config.weapons,
+            weapons_bot,
+            captain_bot,
+        )
     }
 
     pub fn shared_track_measurements(&self) -> TacticalMeasurements {
@@ -412,8 +479,13 @@ impl Simulation {
         };
         self.state.cavitating = self.state.speed > cavitation_speed;
         let cavitation = if self.state.cavitating { 35.0 } else { 0.0 };
-        self.state.acoustic_signature =
-            (propeller + diesels + motors + ventilation + cavitation).clamp(0.0, 100.0);
+        self.state.acoustic_signature = (propeller
+            + diesels
+            + motors
+            + ventilation
+            + cavitation
+            + self.weapons.procedure_noise())
+        .clamp(0.0, 100.0);
         self.state.acoustic_level = match self.state.acoustic_signature {
             value if value < 10.0 => AcousticLevel::Silent,
             value if value < 25.0 => AcousticLevel::Low,

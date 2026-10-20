@@ -1204,24 +1204,26 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
                         ..default()
                     })
                     .with_children(|map| spawn_polar_map(map, true));
-                    body.spawn((
-                        TacticalTrackList,
-                        Text::new("AUCUNE PISTE PARTAGEE"),
-                        TextFont {
-                            font_size: FontSize::Px(12.0),
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.75, 0.92, 0.95)),
-                        Node {
-                            flex_basis: px(0),
-                            flex_grow: 1.0,
-                            min_width: px(174),
-                            padding: UiRect::all(px(8)),
-                            border: UiRect::all(px(1)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgba(0.15, 0.7, 0.8, 0.35)),
-                    ));
+                    body.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        flex_basis: px(0),
+                        min_width: px(174),
+                        min_height: px(0),
+                        ..default()
+                    })
+                    .with_children(|controls| {
+                        controls.spawn((
+                            TacticalTrackList,
+                            Text::new("AUCUNE PISTE PARTAGEE"),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.75, 0.92, 0.95)),
+                        ));
+                        crate::weapons_ui::spawn(controls);
+                    });
                 });
         });
 }
@@ -1718,22 +1720,20 @@ fn update_tactical_station(
         .as_ref()
         .map(|submarine| {
             format!(
-                "BATIMENT // CAP {:03.0} deg // {:.1} kn // PROF. {:.0} m\n\n",
+                "CAP {:03.0} deg / {:.1} kn / PROF. {:.0} m\n",
                 submarine.common.heading, submarine.common.speed, submarine.common.depth
             )
         })
         .unwrap_or_default();
     list.0 = if tactical.shared_tracks.is_empty() {
-        format!(
-            "{own_state}AUCUNE PISTE PARTAGEE\n\nLa carte ne montre aucune verite ennemie non observee."
-        )
+        format!("{own_state}AUCUNE PISTE PARTAGEE")
     } else {
         let tracks = tactical
             .shared_tracks
             .iter()
-            .map(|track| track_line(track, state.server_tick))
+            .map(|track| format!("P{} {:?}", track.id.0, track.classification))
             .collect::<Vec<_>>()
-            .join("\n\n");
+            .join(" / ");
         format!("{own_state}{tracks}")
     };
 }
@@ -2454,7 +2454,7 @@ fn role_summary(role: CrewRole) -> &'static str {
     }
 }
 
-fn error_label(error: &ProtocolError) -> String {
+pub(crate) fn error_label(error: &ProtocolError) -> String {
     match error {
         ProtocolError::RoleAlreadyTaken(role) => {
             format!("POSTE DEJA PRIS : {}", role_label(*role))
@@ -2474,6 +2474,22 @@ fn error_label(error: &ProtocolError) -> String {
         }
         ProtocolError::InvalidTrackMerge => "FUSION DE PISTES INVALIDE".to_owned(),
         ProtocolError::SonarPingCoolingDown => "PING SONAR EN RECHARGE".to_owned(),
+        ProtocolError::InvalidTube => "TUBE INEXISTANT".into(),
+        ProtocolError::InvalidTubePhase => "PROCEDURE : ETAPE DU TUBE INCOMPATIBLE".into(),
+        ProtocolError::NoTorpedoes => "RESERVE VIDE".into(),
+        ProtocolError::InvalidShotSettings => "REGLAGES DE TIR INVALIDES".into(),
+        ProtocolError::TrackNotShared => "PISTE EXPIREE OU NON PARTAGEE".into(),
+        ProtocolError::NoFiringSolution => "Aucune interception avec ces estimations : attendre de nouvelles observations ou corriger les reglages.".into(),
+        ProtocolError::ShotNotAuthorized => "ATTENDRE L'AUTORISATION DU CAPITAINE".into(),
+        ProtocolError::LaunchDepthExceeded => "REMONTER A 20 M OU MOINS POUR TIRER".into(),
+        ProtocolError::WeaponsControlledByHuman => "LE POSTE ARMEMENT EST HUMAIN".into(),
+        ProtocolError::MissingTargetDistance => "Distance cible inconnue : attendre les observations du Sonar.".into(),
+        ProtocolError::MissingTargetHeading => "Cap cible inconnu : attendre que le Sonar estime sa route.".into(),
+        ProtocolError::MissingTargetSpeed => "Vitesse cible inconnue : attendre que le Sonar estime sa vitesse.".into(),
+        ProtocolError::InterceptOutOfRange => "Interception au-dela de l'autonomie de la torpille : rapprocher le sous-marin ou choisir une autre piste.".into(),
+        ProtocolError::TargetOutsideTubeSector => "Direction du tir hors secteur : faire manoeuvrer le Pilote ou choisir un tube de l'autre orientation (avant/arriere).".into(),
+        ProtocolError::AuthorizationSettingsMismatch => "Autorisation refusee : la configuration du tube a change. Relire la configuration appliquee puis autoriser a nouveau.".into(),
+        ProtocolError::TorpedoDepthExceedsImpactZone { maximum_meters } => format!("Torpille trop profonde pour une cible de surface : regler Prof. torpille a {maximum_meters:.0}m ou moins, puis Configurer."),
     }
 }
 
