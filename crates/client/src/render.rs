@@ -2584,18 +2584,8 @@ fn damage_status(state: &GameState) -> String {
         .last_cause
         .map(damage_cause_label)
         .unwrap_or("AUCUNE AVARIE");
-    let explosion = state
-        .events
-        .iter()
-        .rev()
-        .find_map(|(tick, event)| {
-            matches!(event, shared::GameEvent::DepthChargeHeard).then_some(*tick)
-        })
-        .filter(|tick| state.server_tick.saturating_sub(*tick) <= 100)
-        .map(|_| "EXPLOSION ENTENDUE")
-        .unwrap_or(cause);
     format!(
-        "{status} {:.0}% // EAU {:.1}%\n{explosion}",
+        "{status} {:.0}% // EAU {:.1}%\n{cause}",
         damage.hull_integrity, damage.flooding
     )
 }
@@ -2610,7 +2600,7 @@ fn spawn_combat_status(panel: &mut ChildSpawnerCommands) {
         },
         TextColor(Color::srgb(1.0, 0.85, 0.5)),
         Node {
-                height: px(32),
+            height: px(32),
             flex_shrink: 0.0,
             overflow: Overflow::clip(),
             ..default()
@@ -2997,8 +2987,8 @@ mod tests {
         state.submarine.as_mut().unwrap().common.damage = shared::DamageSummary::default();
         state
             .events
-            .push_back((100, shared::GameEvent::DepthChargeHeard));
-        assert!(damage_status(&state).contains("EXPLOSION ENTENDUE"));
+            .push_back((100, shared::GameEvent::ExplosionHeard));
+        assert!(damage_status(&state).contains("AUCUNE AVARIE"));
         assert!(damage_status(&state).contains("COQUE 100%"));
         state.server_tick = 201;
         assert!(!damage_status(&state).contains("EXPLOSION ENTENDUE"));

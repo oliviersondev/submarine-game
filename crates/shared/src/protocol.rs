@@ -217,8 +217,9 @@ pub enum GameEvent {
         bearing: f32,
         bearing_uncertainty: f32,
     },
-    /// Audible blast only: no charge/escort identity, coordinates or hit result.
-    DepthChargeHeard,
+    /// Audible blast only: no weapon/source identity, coordinates or hit result.
+    /// Wire index 9 is unchanged from the former `DepthChargeHeard` name.
+    ExplosionHeard,
     SubmarineDamaged {
         cause: crate::DamageCause,
     },
@@ -525,7 +526,7 @@ mod tests {
     #[test]
     fn version_eight_damage_events_have_stable_fixtures() {
         for (event, fixture) in [
-            (GameEvent::DepthChargeHeard, vec![8, 5, 42, 9]),
+            (GameEvent::ExplosionHeard, vec![8, 5, 42, 9]),
             (
                 GameEvent::SubmarineDamaged {
                     cause: crate::DamageCause::DepthCharge,

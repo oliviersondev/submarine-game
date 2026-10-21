@@ -124,7 +124,7 @@ impl Simulation {
         for charge in exploded {
             let distance = charge.distance(self.state.x, self.state.y, self.state.depth);
             if charge.audible_at(distance) {
-                events.push(GameEvent::DepthChargeHeard);
+                events.push(GameEvent::ExplosionHeard);
             }
             // Local damage is real physics, not an observation fed back to the AI.
             let dx = charge.x - self.state.x;
@@ -686,7 +686,7 @@ mod tests {
             explosions += sim
                 .tick(0.05)
                 .iter()
-                .filter(|e| matches!(e, shared::GameEvent::DepthChargeHeard))
+                .filter(|e| matches!(e, shared::GameEvent::ExplosionHeard))
                 .count();
         }
         assert!(explosions > 0);
@@ -713,8 +713,8 @@ mod tests {
         let b = evasive.tick(20.0);
         assert!(stationary.state.hull_integrity < 100.0);
         assert_eq!(evasive.state.hull_integrity, 100.0);
-        assert!(a.contains(&shared::GameEvent::DepthChargeHeard));
-        assert!(b.contains(&shared::GameEvent::DepthChargeHeard));
+        assert!(a.contains(&shared::GameEvent::ExplosionHeard));
+        assert!(b.contains(&shared::GameEvent::ExplosionHeard));
         assert!(evasive.damage_history().is_empty());
         assert_eq!(evasive.world.charges.len(), stationary.world.charges.len());
         let flooding = stationary.damage_summary().flooding;

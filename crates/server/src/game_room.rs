@@ -178,8 +178,7 @@ fn broadcast(
         if matches!(
             &message.payload,
             ServerPayload::Event {
-                event: shared::GameEvent::SonarPingHeard { .. }
-                    | shared::GameEvent::DepthChargeHeard,
+                event: shared::GameEvent::SonarPingHeard { .. },
                 ..
             }
         ) && !matches!(role, CrewRole::Captain | CrewRole::Sonar)
@@ -626,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn charge_sounds_are_filtered_but_local_damage_reaches_all_roles() {
+    fn audible_explosions_and_local_damage_reach_all_roles() {
         let mut players = HashMap::new();
         let mut receivers = vec![];
         for (index, role) in CrewRole::ALL.into_iter().enumerate() {
@@ -638,14 +637,11 @@ mod tests {
             &players,
             ServerPayload::Event {
                 tick: 1,
-                event: shared::GameEvent::DepthChargeHeard,
+                event: shared::GameEvent::ExplosionHeard,
             },
         );
-        for (role, rx) in &mut receivers {
-            assert_eq!(
-                rx.try_recv().is_ok(),
-                matches!(role, CrewRole::Captain | CrewRole::Sonar)
-            );
+        for (_, rx) in &mut receivers {
+            assert!(rx.try_recv().is_ok());
         }
         broadcast(
             &players,

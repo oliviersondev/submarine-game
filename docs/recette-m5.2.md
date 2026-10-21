@@ -20,9 +20,11 @@ Attendu : les pings ennemis deviennent perceptibles quand l'escorte recherche. U
 
 - Une fois l'escorte estimée proche, réduire à 0–2 nœuds, rester vers 100 m et continuer ponctuellement les pings pour provoquer la recherche.
 - Attendre la riposte. L'attaque nécessite une estimation assez récente et précise, puis une approche à portée de largage ; une absence d'attaque ne constitue pas seule un échec.
-- Surveiller le message `EXPLOSION ENTENDUE` au Sonar/Capitaine, puis coque/eau et l'Ingénierie.
+- Surveiller le bandeau `EXPLOSION ENTENDUE` aux quatre postes ouverts, puis coque/eau et l'Ingénierie. Il est également disponible à l'Armement si un cinquième humain rejoint avant le démarrage.
 
 Attendu en cas de coup proche : baisse de coque, intégrité d'au moins un compartiment réduite, fuite positive, puis hausse de l'eau au fil des ticks. Les alertes `COQUE ENDOMMAGEE` et `VOIE D'EAU` restent présentes dans les snapshots. L'Ingénierie conserve tick, cause et perte de coque ; les autres postes ne reçoivent pas le détail des compartiments. Une explosion audible peut manquer et ne provoquer aucun dégât.
+
+Vérifier aussi le bandeau : il disparaît après 3 secondes sans nouvelle explosion ; chaque nouvelle explosion relance sa durée, et les explosions rapprochées affichent un compteur sans empilement. Les explosions inaudibles et les simples pings ne le déclenchent pas. Il ne révèle ni direction, ni distance, ni résultat d'impact. Les commandes restent visibles et cliquables/tactiles pendant l'alerte, y compris en 360×640 et 640×360. Les impacts de torpille audibles doivent produire la même alerte pour tout l'équipage, sans double comptage dans les postes qui reçoivent aussi l'événement d'impact identifié.
 
 ## 3. Persistance et profondeur
 
@@ -41,7 +43,7 @@ La date exacte de largage étant volontairement cachée, ce test manuel est indi
 ## 5. Destruction et interfaces
 
 - Dans une salle dédiée, rester sous les attaques ou demander 250 m et attendre la perte de coque par pression.
-- Attendu : `SOUS-MARIN PERDU`, cause conservée, déplacement immobilisé, nouvelles commandes refusées explicitement. Pas encore d'écran de défaite ou bilan ; créer une nouvelle salle pour rejouer.
+- Attendu : bandeau rouge permanent `SOUS-MARIN PERDU` aux cinq postes, cause conservée, déplacement immobilisé, nouvelles commandes refusées explicitement. Le bandeau reste visible au-delà de 3 secondes, remplace l'alerte d'explosion et persiste après une déconnexion si le dernier état reçu confirme la perte. Pas encore d'écran de défaite ou bilan ; créer une nouvelle salle pour rejouer.
 - Tester 1280×720, 360×640 et 640×360 : synthèse lisible, aucun chevauchement, zones Sonar indépendantes et Ingénierie défilante (molette et glissement tactile), commandes accessibles en défilant.
 
 Pour chaque anomalie : noter rôle, scénario, tick ou temps écoulé, consignes, résultat et capture. L'équilibrage des dégâts et l'ergonomie sur téléphone réel restent à valider.

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
+mod explosion_ui;
 mod network;
 mod render;
 mod role;
@@ -21,6 +22,7 @@ fn main() {
         }))
         .add_plugins(network::NetworkPlugin)
         .add_plugins(render::RenderPlugin)
+        .add_plugins(explosion_ui::ExplosionUiPlugin)
         .add_plugins(weapons_ui::WeaponsUiPlugin)
         .run();
 }
