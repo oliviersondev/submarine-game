@@ -337,6 +337,7 @@ impl Weapons {
             {
                 run.active = false;
                 if (torpedo.x - state.x).hypot(torpedo.y - state.y) <= 6000.0 {
+                    events.push(GameEvent::ExplosionHeard);
                     events.push(GameEvent::TorpedoImpact {
                         torpedo_id: torpedo.id,
                     });
@@ -718,7 +719,7 @@ mod tests {
         }
         let mut events = vec![];
         for _ in 0..9000 {
-            world.update(0.05);
+            world.update(0.05, &state, 0, shared::EscortConfig::default());
             events.extend(weapons.update(0.05, &mut world, config, &state));
         }
         (events, world)
@@ -731,9 +732,17 @@ mod tests {
             .iter()
             .any(|e| matches!(e, GameEvent::TorpedoImpact { .. })));
         assert!(!world.vessels[0].afloat());
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, GameEvent::ExplosionHeard))
+                .count(),
+            1
+        );
         for (changed, error) in [(true, 0.0), (false, 15.0)] {
             let (events, world) = attack(changed, error);
             assert!(world.vessels[0].afloat());
+            assert!(!events.contains(&GameEvent::ExplosionHeard));
             assert!(!events
                 .iter()
                 .any(|e| matches!(e, GameEvent::TorpedoImpact { .. })));

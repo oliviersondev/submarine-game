@@ -175,6 +175,16 @@ fn broadcast(
 ) {
     let message = ServerMessage::new(payload);
     for (role, tx) in players.values() {
+        if matches!(
+            &message.payload,
+            ServerPayload::Event {
+                event: shared::GameEvent::SonarPingHeard { .. },
+                ..
+            }
+        ) && !matches!(role, CrewRole::Captain | CrewRole::Sonar)
+        {
+            continue;
+        }
         if let ServerPayload::Event {
             event:
                 shared::GameEvent::TorpedoFired { .. }
@@ -231,6 +241,7 @@ fn project_submarine(sim: &Simulation, role: CrewRole) -> SubmarineSnapshot {
         dive_state: state.dive_state,
         acoustic_level: state.acoustic_level,
         alerts: sim.active_alerts(),
+        damage: sim.damage_summary(),
     };
     let pilot = (role == CrewRole::Pilot).then_some(PilotMeasurements {
         ordered_heading: state.ordered_heading,
@@ -253,6 +264,8 @@ fn project_submarine(sim: &Simulation, role: CrewRole) -> SubmarineSnapshot {
         oxygen: state.oxygen,
         electrical_load: state.electrical_load,
         air_intake_available: sim.air_intake_available(),
+        compartments: sim.compartments(),
+        damage_history: sim.damage_history(),
     });
     SubmarineSnapshot {
         common,
@@ -569,5 +582,105 @@ mod tests {
         assert!(command_allowed_for_role(CrewRole::Sonar, &command));
         assert!(!command_allowed_for_role(CrewRole::Captain, &command));
         assert!(!command_allowed_for_role(CrewRole::Weapons, &command));
+    }
+
+    #[test]
+    fn damage_snapshots_survive_missed_events_and_details_are_engineer_only() {
+        let mut sim = Simulation::new();
+        // Real acoustic acquisition and combat; no injected enemy decision or damage.
+        sim.state.x = 0.0; // escort starts within 400 m of this point
+        sim.state.y = 4_050.0;
+        sim.state.depth = 100.0;
+        sim.state.ordered_depth = 100.0;
+        sim.apply_command(PlayerCommand::SonarPing).unwrap();
+        for _ in 0..3_600 {
+            sim.tick(0.05);
+        }
+        assert!(sim.damage_summary().hull_integrity < 100.0);
+        for role in CrewRole::ALL {
+            let projection = project_mission(&sim, role);
+            assert_eq!(projection.submarine.common.damage, sim.damage_summary());
+            assert!(projection
+                .submarine
+                .common
+                .alerts
+                .contains(&shared::AlertKind::HullDamaged));
+            if let Some(engineering) = projection.submarine.engineering {
+                assert_eq!(role, CrewRole::Engineer);
+                assert!(!engineering.damage_history.is_empty());
+                assert_eq!(engineering.compartments, sim.compartments());
+            } else {
+                assert_ne!(role, CrewRole::Engineer);
+            }
+            let message = ServerMessage::new(ServerPayload::Snapshot {
+                snapshot_id: 1,
+                tick: sim.tick,
+                mission: project_mission(&sim, role),
+            });
+            assert_eq!(
+                shared::codec::decode::<ServerMessage>(&shared::codec::encode(&message)).unwrap(),
+                message
+            );
+        }
+    }
+
+    #[test]
+    fn audible_explosions_and_local_damage_reach_all_roles() {
+        let mut players = HashMap::new();
+        let mut receivers = vec![];
+        for (index, role) in CrewRole::ALL.into_iter().enumerate() {
+            let (tx, rx) = mpsc::channel(4);
+            players.insert(PlayerId(index as u64), (role, tx));
+            receivers.push((role, rx));
+        }
+        broadcast(
+            &players,
+            ServerPayload::Event {
+                tick: 1,
+                event: shared::GameEvent::ExplosionHeard,
+            },
+        );
+        for (_, rx) in &mut receivers {
+            assert!(rx.try_recv().is_ok());
+        }
+        broadcast(
+            &players,
+            ServerPayload::Event {
+                tick: 2,
+                event: shared::GameEvent::SubmarineDamaged {
+                    cause: shared::DamageCause::DepthCharge,
+                },
+            },
+        );
+        for (_, rx) in &mut receivers {
+            assert!(rx.try_recv().is_ok());
+        }
+    }
+
+    #[test]
+    fn audible_pings_are_only_sent_to_captain_and_sonar() {
+        let mut players = HashMap::new();
+        let mut receivers = vec![];
+        for (index, role) in CrewRole::ALL.into_iter().enumerate() {
+            let (tx, rx) = mpsc::channel(4);
+            players.insert(PlayerId(index as u64), (role, tx));
+            receivers.push((role, rx));
+        }
+        broadcast(
+            &players,
+            ServerPayload::Event {
+                tick: 1,
+                event: shared::GameEvent::SonarPingHeard {
+                    bearing: 45.0,
+                    bearing_uncertainty: 3.0,
+                },
+            },
+        );
+        for (role, mut rx) in receivers {
+            assert_eq!(
+                rx.try_recv().is_ok(),
+                matches!(role, CrewRole::Captain | CrewRole::Sonar)
+            );
+        }
     }
 }

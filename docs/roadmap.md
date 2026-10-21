@@ -31,7 +31,7 @@ Le dépôt fournit déjà :
 - interfaces tactiles Pilote, Ingénierie, Sonar et carte tactique du Capitaine.
 - procédure tactile d'armement, autorisation du Capitaine, torpilles simulées et dégâts aux navires.
 
-Les réparations et la recherche/attaque tactique de l'escorte sont encore symboliques. Le convoi change simplement de route aux impacts proches. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
+L'escorte possède une recherche acoustique privée, des pings actifs et un retour au convoi après perte de contact (M5.1), puis une riposte par charges non guidées, des dégâts de coque et des voies d'eau affectant la profondeur (M5.2). Les cargos changent de route aux impacts proches. Le contrôle des avaries reste à réaliser ; les réparations sont encore symboliques. Les salles démarrent dès un humain et remplissent les rôles vacants avec des bots, mais ne gèrent ni persistance ni reprise de session.
 
 ## 3. Vue d'ensemble
 
@@ -280,6 +280,14 @@ Corrections de revue M4 (protocole v6) : limite de profondeur commune à la vali
 ### Critère de validation
 
 Après avoir attaqué, l'équipage peut rompre le contact et survivre à une recherche ennemie en contrôlant bruit, profondeur et dégâts.
+
+### Découpage et état de M5
+
+- **M5.1 — Recherche acoustique : implémenté le 20 octobre 2026.** Escorte, suspicion, recherche et retour au convoi ; observations passives, réception des pings du joueur, sonar actif ennemi, vieillissement de piste et alerte d'explosion sans localisation du tireur. Protocole v7 incompatible v6 : `EscortConfig` et événement de ping entendu, limité au Sonar et au Capitaine. Le client affiche les trois dernières émissions entendues sans confirmation de détection. Les tests couvrent portée, bruit propre, écho imparfait, émission sans écho, escorte coulée, durée bornée, manœuvres limitées et indépendance vis-à-vis des déplacements non observés. L'essai navigateur/téléphone et l'équilibrage restent à réaliser.
+- **M5.2 — Riposte et dégâts : implémenté le 20 octobre 2026, recette manuelle à confirmer.** État d'attaque depuis une piste privée récente et assez précise, charges non guidées à profondeurs prédéfinies, stock fini et cadence limitée. Dégâts radiaux de coque et de compartiment, voies d'eau persistantes, dérive verticale, destruction par coque, pression ou inondation complète. Protocole v8 incompatible v7 : synthèse à tous les postes, détails et historique borné à l'Ingénierie. Depuis le 21 octobre, les explosions audibles déclenchent aux cinq postes un bandeau non bloquant de 3 secondes avec regroupement, sans confirmation d'impact. Les snapshots conservent l'état malgré la perte d'événements. Les tests couvrent acquisition acoustique jusqu'aux dégâts, absence d'omniscience, esquive après largage, cadences/stock, filtrage, destruction et rejeu. Voir [la recette M5.2](recette-m5.2.md). L'équilibrage et l'essai tactile réel restent à confirmer.
+- **M5.3 — Contrôle des avaries : à réaliser.** Pompage, isolation, réparations temporisées, incendies, pannes, propagation limitée, conséquences sur les commandes, priorités et bot Ingénierie utilisable en solo.
+
+La détection visuelle/aérienne reste exclue. M5 reste incomplet tant que le contrôle des avaries n'est pas jouable. En M5.2, les dégâts ne sont pas réparables ; un sous-marin détruit est immobilisé et refuse les commandes, sans écran de fin de mission (M6).
 
 ## 10. M6 - Mission de référence complète
 
