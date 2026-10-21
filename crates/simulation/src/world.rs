@@ -41,6 +41,7 @@ pub(crate) struct World {
     pub(crate) vessels: Vec<Vessel>,
     pub(crate) escort_ai: EscortAi,
     escort_config: shared::EscortConfig,
+    pub(crate) charges: Vec<crate::depth_charges::Charge>,
 }
 
 impl World {
@@ -56,6 +57,7 @@ impl World {
             ],
             escort_ai: EscortAi::default(),
             escort_config: shared::EscortConfig::default(),
+            charges: Vec::new(),
         }
     }
 
@@ -83,7 +85,9 @@ impl World {
                     self.escort_ai.observe(observation);
                 }
             }
-            if self.escort_ai.phase == Phase::Search && self.escort_ai.ping_remaining <= 0.0 {
+            if matches!(self.escort_ai.phase, Phase::Search | Phase::Attack)
+                && self.escort_ai.ping_remaining <= 0.0
+            {
                 self.escort_ai.ping_remaining = config.ping_interval.max(dt);
                 if let Some(event) =
                     detection::audible_enemy_ping(vessel, submarine, config, self.seed, tick)
@@ -95,6 +99,14 @@ impl World {
                 {
                     self.escort_ai.observe(observation);
                 }
+            }
+            if self.escort_ai.attack((vessel.x, vessel.y), config) {
+                self.charges.extend(crate::depth_charges::Charge::salvo(
+                    vessel.x,
+                    vessel.y,
+                    vessel.heading,
+                    config.attack,
+                ));
             }
             let cargos: Vec<_> = self
                 .vessels
@@ -383,6 +395,30 @@ mod tests {
         let turn = (new.heading - old.heading + 180.0).rem_euclid(360.0) - 180.0;
         assert!(turn.abs() <= config.turn_rate * 0.05 + 0.0001);
         assert!((new.speed - old.speed).abs() <= config.acceleration * 0.05 + 0.0001);
+    }
+
+    #[test]
+    fn unobserved_player_moves_cannot_redirect_an_attack_or_change_preset_depths() {
+        let config = EscortConfig::default();
+        let mut a = World::new(42);
+        let own = (a.vessels[2].x, a.vessels[2].y);
+        a.escort_ai.observe(crate::enemy_ai::Observation {
+            x: own.0,
+            y: own.1,
+            uncertainty: 50.0,
+            confidence: 100.0,
+            tick: 0,
+        });
+        let mut b = a.clone();
+        a.update(0.05, &silent_sub(30_000.0, 20_000.0), 1, config);
+        let mut other = silent_sub(-40_000.0, -30_000.0);
+        other.depth = 200.0;
+        b.update(0.05, &other, 1, config);
+        assert_eq!(a, b);
+        assert_eq!(a.charges.len(), 3);
+        a.vessels[2].integrity = 0.0;
+        a.update(40.0, &other, 2, config);
+        assert_eq!(a.charges.len(), 3);
     }
 
     #[test]

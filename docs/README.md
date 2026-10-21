@@ -6,6 +6,8 @@ Cette documentation définit la direction produit et technique de *Submarine Gam
 
 Pour prendre en main le jeu : **[Guide joueur — Armement et première attaque](guide-armement.md)** (lecture de l'écran, procédure de tir et dépannage).
 
+Pour valider la riposte et les dégâts : **[Recette M5.2](recette-m5.2.md)**.
+
 | Document | Objet | Statut |
 |---|---|---|
 | [Game Design Document](game-design.md) | vision, boucle de jeu, rôles, règles et expérience mobile | brouillon 0.1 |

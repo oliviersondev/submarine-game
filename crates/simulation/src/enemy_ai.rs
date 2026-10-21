@@ -6,6 +6,7 @@ pub(crate) enum Phase {
     Escort,
     Suspicion,
     Search,
+    Attack,
     Returning,
 }
 
@@ -40,6 +41,10 @@ pub(crate) struct EscortAi {
     leg_age: f32,
     pub(crate) passive_remaining: f32,
     pub(crate) ping_remaining: f32,
+    engagement_age: f32,
+    attack_cooldown: f32,
+    attack_aim: Option<(f32, f32)>,
+    salvos_used: u8,
 }
 
 impl Default for EscortAi {
@@ -54,6 +59,10 @@ impl Default for EscortAi {
             leg_age: 0.0,
             passive_remaining: 0.0,
             ping_remaining: 0.0,
+            engagement_age: 0.0,
+            attack_cooldown: 0.0,
+            attack_aim: None,
+            salvos_used: 0,
         }
     }
 }
@@ -78,13 +87,16 @@ impl EscortAi {
     }
 
     pub(crate) fn alert(&mut self, x: f32, y: f32) {
-        if self.return_grace <= 0.0 && self.phase != Phase::Search {
+        if self.return_grace <= 0.0 && !matches!(self.phase, Phase::Search | Phase::Attack) {
             self.alert_zone = Some((x, y));
             self.enter(Phase::Suspicion);
         }
     }
 
     fn enter(&mut self, phase: Phase) {
+        if phase == Phase::Search && self.phase == Phase::Suspicion {
+            self.engagement_age = 0.0;
+        }
         self.phase = phase;
         self.phase_age = 0.0;
         self.leg_age = 0.0;
@@ -97,6 +109,10 @@ impl EscortAi {
         self.passive_remaining = (self.passive_remaining - dt).max(0.0);
         self.ping_remaining = (self.ping_remaining - dt).max(0.0);
         self.return_grace = (self.return_grace - dt).max(0.0);
+        self.attack_cooldown = (self.attack_cooldown - dt).max(0.0);
+        if matches!(self.phase, Phase::Search | Phase::Attack) {
+            self.engagement_age += dt;
+        }
         if let Some(track) = &mut self.track {
             track.age += dt;
             track.confidence = (track.confidence - config.confidence_decay * dt).max(0.0);
@@ -122,8 +138,8 @@ impl EscortAi {
                     }
                 }
             }
-            Phase::Search => {
-                if self.phase_age >= config.search_duration
+            Phase::Search | Phase::Attack => {
+                if self.engagement_age >= config.search_duration
                     || (self.track.is_none() && self.alert_zone.is_none())
                 {
                     self.abandon(config);
@@ -136,8 +152,44 @@ impl EscortAi {
     fn abandon(&mut self, config: EscortConfig) {
         self.track = None;
         self.alert_zone = None;
+        self.attack_aim = None;
         self.return_grace = config.return_grace;
         self.enter(Phase::Returning);
+    }
+
+    /// Only an estimated track and own position can authorize a release.
+    pub(crate) fn attack(&mut self, own: (f32, f32), config: EscortConfig) -> bool {
+        let eligible = self.track.as_ref().is_some_and(|track| {
+            track.confidence >= config.attack.confidence
+                && track.uncertainty <= config.attack.max_uncertainty
+                && track.age <= config.attack.max_track_age
+        });
+        if self.phase == Phase::Search
+            && eligible
+            && self.attack_cooldown <= 0.0
+            && self.salvos_used < config.attack.salvos
+        {
+            let track = self.track.as_ref().unwrap();
+            self.attack_aim = Some((track.x, track.y));
+            self.enter(Phase::Attack);
+        }
+        if self.phase != Phase::Attack {
+            return false;
+        }
+        if !eligible || self.phase_age >= 25.0 {
+            self.attack_aim = None;
+            self.enter(Phase::Search);
+            return false;
+        }
+        let aim = self.attack_aim.unwrap();
+        if (aim.0 - own.0).hypot(aim.1 - own.1) <= config.attack.release_range {
+            self.salvos_used += 1;
+            self.attack_cooldown = config.attack.cooldown;
+            self.attack_aim = None;
+            self.enter(Phase::Search);
+            return true;
+        }
+        false
     }
 
     /// Own position and friendly formation are known; target position is estimated.
@@ -148,6 +200,9 @@ impl EscortAi {
         config: EscortConfig,
     ) -> (f32, f32) {
         let (fx, fy, heading, speed) = formation;
+        if let Some(aim) = self.attack_aim {
+            return (bearing(own, aim), config.search_speed);
+        }
         if matches!(self.phase, Phase::Escort | Phase::Returning) {
             let distance = (fx - own.0).hypot(fy - own.1);
             if distance < 250.0 {
@@ -198,6 +253,71 @@ mod tests {
             confidence: 60.0,
             tick: 1,
         }
+    }
+
+    #[test]
+    fn release_requires_precise_fresh_track_proximity_cooldown_and_stock() {
+        let mut config = EscortConfig::default();
+        config.attack.salvos = 2;
+        let mut ai = EscortAi::default();
+        ai.alert(500.0, 800.0);
+        ai.advance(config.suspicion_duration, config);
+        assert!(!ai.attack((500.0, 800.0), config));
+        ai.observe(Observation {
+            confidence: 100.0,
+            uncertainty: 500.0,
+            ..observation()
+        });
+        assert!(!ai.attack((500.0, 800.0), config));
+        ai.observe(Observation {
+            confidence: 100.0,
+            uncertainty: 150.0,
+            ..observation()
+        });
+        assert!(!ai.attack((1_500.0, 800.0), config));
+        assert_eq!(ai.phase, Phase::Attack);
+        assert!(ai.attack((500.0, 800.0), config));
+        assert!(!ai.attack((500.0, 800.0), config));
+        ai.advance(config.attack.cooldown, config);
+        ai.observe(Observation {
+            confidence: 100.0,
+            uncertainty: 150.0,
+            ..observation()
+        });
+        assert!(ai.attack((500.0, 800.0), config));
+        ai.advance(config.attack.cooldown, config);
+        ai.observe(Observation {
+            confidence: 100.0,
+            uncertainty: 150.0,
+            ..observation()
+        });
+        assert!(!ai.attack((500.0, 800.0), config));
+    }
+
+    #[test]
+    fn stale_tracks_cannot_authorize_attack_and_attacks_do_not_reset_search_budget() {
+        let mut config = EscortConfig::default();
+        config.search_duration = 40.0;
+        let mut ai = EscortAi::default();
+        ai.observe(Observation {
+            confidence: 100.0,
+            uncertainty: 50.0,
+            ..observation()
+        });
+        ai.advance(0.05, config);
+        ai.advance(config.attack.max_track_age + 1.0, config);
+        assert!(!ai.attack((500.0, 800.0), config));
+        for tick in 1..=40 {
+            ai.observe(Observation {
+                confidence: 100.0,
+                uncertainty: 50.0,
+                tick,
+                ..observation()
+            });
+            ai.attack((500.0, 800.0), config);
+            ai.advance(1.0, config);
+        }
+        assert_eq!(ai.phase, Phase::Returning);
     }
 
     #[test]

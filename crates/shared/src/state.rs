@@ -72,13 +72,19 @@ pub enum AlertKind {
     AirCritical,
     Cavitation,
     CriticalDepth,
+    HullDamaged,
+    Flooding,
+    SubmarineDestroyed,
 }
 
-pub const ALERT_KINDS: [AlertKind; 4] = [
+pub const ALERT_KINDS: [AlertKind; 7] = [
     AlertKind::BatteryLow,
     AlertKind::AirCritical,
     AlertKind::Cavitation,
     AlertKind::CriticalDepth,
+    AlertKind::HullDamaged,
+    AlertKind::Flooding,
+    AlertKind::SubmarineDestroyed,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -221,6 +227,7 @@ pub struct CommonMeasurements {
     pub dive_state: DiveState,
     pub acoustic_level: AcousticLevel,
     pub alerts: Vec<AlertKind>,
+    pub damage: DamageSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -243,6 +250,62 @@ pub struct EngineeringMeasurements {
     pub oxygen: f32,
     pub electrical_load: f32,
     pub air_intake_available: bool,
+    pub compartments: [CompartmentState; 3],
+    /// Bounded authoritative history, independent of transient event delivery.
+    pub damage_history: Vec<DamageRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DamageCause {
+    DepthCharge,
+    Pressure,
+    Flooding,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DamageSummary {
+    pub hull_integrity: f32,
+    pub flooding: f32,
+    pub destroyed: bool,
+    pub last_cause: Option<DamageCause>,
+}
+
+impl Default for DamageSummary {
+    fn default() -> Self {
+        Self {
+            hull_integrity: 100.0,
+            flooding: 0.0,
+            destroyed: false,
+            last_cause: None,
+        }
+    }
+}
+
+/// Fixed order: bow, control room, machinery. All percentages are 0..=100.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CompartmentState {
+    pub integrity: f32,
+    pub flooding: f32,
+    pub breach_rate: f32,
+}
+
+impl Default for CompartmentState {
+    fn default() -> Self {
+        Self {
+            integrity: 100.0,
+            flooding: 0.0,
+            breach_rate: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DamageRecord {
+    pub tick: u64,
+    pub cause: DamageCause,
+    pub hull_damage: f32,
+    pub compartment: Option<u8>,
+    pub destroyed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

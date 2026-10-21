@@ -1,3 +1,5 @@
+mod damage;
+mod depth_charges;
 mod detection;
 mod enemy_ai;
 mod tracks;
@@ -23,6 +25,7 @@ pub enum SimulationError {
     TrackNotFound(TrackId),
     InvalidTrackMerge,
     SonarPingCoolingDown,
+    SubmarineDestroyed,
 }
 
 impl From<TrackError> for SimulationError {
@@ -41,6 +44,7 @@ impl From<SimulationError> for ProtocolError {
             SimulationError::TrackNotFound(id) => Self::TrackNotFound(id),
             SimulationError::InvalidTrackMerge => Self::InvalidTrackMerge,
             SimulationError::SonarPingCoolingDown => Self::SonarPingCoolingDown,
+            SimulationError::SubmarineDestroyed => Self::SubmarineDestroyed,
         }
     }
 }
@@ -56,6 +60,7 @@ pub struct Simulation {
     next_observation_id: u64,
     ping_cooldown_remaining: f32,
     weapons: weapons::Weapons,
+    damage: damage::Damage,
 }
 
 impl Simulation {
@@ -75,11 +80,16 @@ impl Simulation {
             next_observation_id: 0,
             ping_cooldown_remaining: 0.0,
             weapons: weapons::Weapons::new(),
+            damage: damage::Damage::default(),
         }
     }
 
     pub fn tick(&mut self, dt: f32) -> Vec<GameEvent> {
         if !dt.is_finite() || dt <= 0.0 {
+            return vec![];
+        }
+        if self.damage_summary().destroyed {
+            self.tick = self.tick.wrapping_add(1);
             return vec![];
         }
 
@@ -102,6 +112,53 @@ impl Simulation {
         );
         self.ping_cooldown_remaining = (self.ping_cooldown_remaining - dt).max(0.0);
         self.tick = self.tick.wrapping_add(1);
+        let mut exploded = Vec::new();
+        self.world.charges.retain_mut(|charge| {
+            if charge.advance(dt) {
+                exploded.push(charge.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for charge in exploded {
+            let distance = charge.distance(self.state.x, self.state.y, self.state.depth);
+            if charge.audible_at(distance) {
+                events.push(GameEvent::DepthChargeHeard);
+            }
+            // Local damage is real physics, not an observation fed back to the AI.
+            let dx = charge.x - self.state.x;
+            let dy = charge.y - self.state.y;
+            let angle = self.state.heading.to_radians();
+            let longitudinal = dx * angle.sin() + dy * angle.cos();
+            let compartment = if longitudinal > 10.0 {
+                0
+            } else if longitudinal < -10.0 {
+                2
+            } else {
+                1
+            };
+            events.extend(self.damage.hit(
+                &mut self.state.hull_integrity,
+                charge.damage_at(distance),
+                compartment,
+                self.tick,
+                self.config.damage,
+            ));
+        }
+        events.extend(self.damage.advance(
+            &mut self.state.hull_integrity,
+            dt,
+            self.state.depth,
+            self.config.submarine.crush_depth,
+            self.tick,
+            self.config.damage,
+        ));
+        if self.damage_summary().destroyed {
+            self.state.speed = 0.0;
+            self.state.vertical_speed = 0.0;
+            self.state.turn_rate = 0.0;
+        }
         self.tracker.update(self.tick, &self.state, dt);
         if self.tick % PASSIVE_INTERVAL_TICKS == 0 {
             let observations = detection::passive_observations(
@@ -113,12 +170,10 @@ impl Simulation {
             );
             self.record_observations(observations);
         }
-        events.extend(self.weapons.update(
-            dt,
-            &mut self.world,
-            self.config.weapons,
-            &self.state,
-        ));
+        events.extend(
+            self.weapons
+                .update(dt, &mut self.world, self.config.weapons, &self.state),
+        );
         events.extend(self.update_alerts());
         events
     }
@@ -127,6 +182,9 @@ impl Simulation {
         &mut self,
         command: PlayerCommand,
     ) -> Result<Vec<GameEvent>, SimulationError> {
+        if self.damage_summary().destroyed {
+            return Err(SimulationError::SubmarineDestroyed);
+        }
         let parameters = self.config.submarine;
         match command {
             PlayerCommand::SetHeading(value) if value.is_finite() => {
@@ -238,6 +296,9 @@ impl Simulation {
     }
 
     pub fn automate_engineer(&mut self) {
+        if self.damage_summary().destroyed {
+            return;
+        }
         let intake = self.air_intake_available();
         self.state.propulsion.electric_motors_on = true;
         self.state.propulsion.diesels_on = intake;
@@ -245,7 +306,22 @@ impl Simulation {
         self.state.propulsion.charging = intake && self.state.battery < 99.9;
     }
 
+    pub fn damage_summary(&self) -> shared::DamageSummary {
+        self.damage.summary(self.state.hull_integrity)
+    }
+
+    pub fn compartments(&self) -> [shared::CompartmentState; 3] {
+        self.damage.compartments
+    }
+
+    pub fn damage_history(&self) -> Vec<shared::DamageRecord> {
+        self.damage.history.iter().cloned().collect()
+    }
+
     pub fn automate_sonar(&mut self) {
+        if self.damage_summary().destroyed {
+            return;
+        }
         let track_ids: Vec<_> = self
             .tracker
             .estimates()
@@ -276,6 +352,9 @@ impl Simulation {
     }
 
     pub fn automate_weapons(&mut self, weapons_bot: bool, captain_bot: bool) -> Vec<GameEvent> {
+        if self.damage_summary().destroyed {
+            return vec![];
+        }
         let tracks = self.tracker.shared_estimates();
         if weapons_bot && captain_bot && self.weapons.needs_bot_order() {
             if let Some(track) = tracks
@@ -353,6 +432,9 @@ impl Simulation {
             parameters.vertical_speed * ballast_factor
         };
 
+        let flooding_drift =
+            self.damage.flooding() / 100.0 * self.config.damage.flooding_sink_speed;
+        let target_rate = target_rate + flooding_drift;
         self.state.vertical_speed = target_rate;
         let previous_depth = self.state.depth;
         self.state.depth = (self.state.depth + target_rate * dt).clamp(0.0, parameters.crush_depth);
@@ -360,6 +442,7 @@ impl Simulation {
         if (self.state.ordered_depth - previous_depth).signum()
             != (self.state.ordered_depth - self.state.depth).signum()
             && !self.state.emergency_surface
+            && flooding_drift == 0.0
         {
             self.state.depth = self.state.ordered_depth;
             self.state.vertical_speed = 0.0;
@@ -512,6 +595,9 @@ impl Simulation {
             self.state.oxygen <= parameters.critical_air_threshold,
             self.state.cavitating,
             self.state.depth >= parameters.critical_depth,
+            self.state.hull_integrity < 100.0,
+            self.damage.flooding() > 0.0,
+            self.damage_summary().destroyed,
         ];
         let mut events = Vec::new();
         for (index, alert) in ALERT_KINDS.into_iter().enumerate() {
@@ -586,6 +672,126 @@ fn shortest_angle(current: f32, target: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn acoustic_contact_can_produce_real_damage_without_injected_enemy_tracks() {
+        let mut sim = super::Simulation::new();
+        let escort = &sim.world.vessels[2];
+        sim.state.x = escort.x;
+        sim.state.y = escort.y;
+        sim.state.depth = 100.0;
+        sim.state.ordered_depth = 100.0;
+        sim.apply_command(shared::PlayerCommand::SonarPing).unwrap();
+        let mut explosions = 0;
+        for _ in 0..800 {
+            explosions += sim
+                .tick(0.05)
+                .iter()
+                .filter(|e| matches!(e, shared::GameEvent::DepthChargeHeard))
+                .count();
+        }
+        assert!(explosions > 0);
+        assert!(sim.state.hull_integrity < 100.0);
+        assert!(sim.damage_summary().flooding > 0.0);
+        assert!(!sim.damage_history().is_empty());
+    }
+
+    fn charged_simulation() -> super::Simulation {
+        let mut sim = super::Simulation::new();
+        sim.state.depth = 100.0;
+        sim.state.ordered_depth = 100.0;
+        sim.world.charges =
+            crate::depth_charges::Charge::salvo(0.0, 0.0, 0.0, sim.config.escort.attack);
+        sim
+    }
+
+    #[test]
+    fn a_maneuver_after_release_can_avoid_damage_but_not_the_audible_explosion() {
+        let mut stationary = charged_simulation();
+        let mut evasive = charged_simulation();
+        evasive.state.x = 200.0;
+        let a = stationary.tick(20.0);
+        let b = evasive.tick(20.0);
+        assert!(stationary.state.hull_integrity < 100.0);
+        assert_eq!(evasive.state.hull_integrity, 100.0);
+        assert!(a.contains(&shared::GameEvent::DepthChargeHeard));
+        assert!(b.contains(&shared::GameEvent::DepthChargeHeard));
+        assert!(evasive.damage_history().is_empty());
+        assert_eq!(evasive.world.charges.len(), stationary.world.charges.len());
+        let flooding = stationary.damage_summary().flooding;
+        stationary.tick(0.05);
+        assert!(stationary.damage_summary().flooding > flooding);
+    }
+
+    #[test]
+    fn remote_charges_are_neither_heard_nor_reported_as_damage() {
+        let mut sim = charged_simulation();
+        sim.state.x = 50_000.0;
+        assert!(sim.tick(20.0).is_empty());
+        assert_eq!(sim.damage_summary(), shared::DamageSummary::default());
+    }
+
+    #[test]
+    fn flooding_changes_depth_hold_and_destruction_blocks_commands_and_bots() {
+        let mut sim = charged_simulation();
+        sim.damage.compartments[0].flooding = 30.0;
+        sim.tick(0.05);
+        assert!(sim.state.depth > 100.0);
+        assert!(sim.state.vertical_speed > 0.0);
+        sim.damage.hit(
+            &mut sim.state.hull_integrity,
+            200.0,
+            1,
+            sim.tick,
+            sim.config.damage,
+        );
+        let state = sim.state.clone();
+        assert_eq!(
+            sim.apply_command(shared::PlayerCommand::SetSpeed(8.0)),
+            Err(super::SimulationError::SubmarineDestroyed)
+        );
+        assert!(sim.automate_weapons(true, true).is_empty());
+        sim.automate_engineer();
+        assert!(sim.tick(0.05).is_empty());
+        assert_eq!(sim.state, state);
+    }
+
+    #[test]
+    fn heavy_flooding_can_overwhelm_emergency_ascent_without_non_finite_state() {
+        let mut sim = charged_simulation();
+        sim.world.charges.clear();
+        for compartment in &mut sim.damage.compartments {
+            compartment.flooding = 90.0;
+        }
+        sim.apply_command(shared::PlayerCommand::EmergencySurface)
+            .unwrap();
+        sim.tick(0.05);
+        assert!(sim.state.vertical_speed > 0.0);
+        assert!(sim.state.depth > 100.0);
+        for _ in 0..8_000 {
+            sim.tick(0.05);
+        }
+        assert!(sim.state.depth.is_finite());
+        assert!(sim.state.depth <= sim.config.submarine.crush_depth);
+        assert!(sim.damage_summary().destroyed);
+        assert_eq!(
+            sim.damage_summary().last_cause,
+            Some(shared::DamageCause::Pressure)
+        );
+    }
+
+    #[test]
+    fn combat_damage_and_history_replay_deterministically() {
+        let mut a = charged_simulation();
+        let mut b = charged_simulation();
+        for _ in 0..2_000 {
+            assert_eq!(a.tick(0.05), b.tick(0.05));
+        }
+        assert_eq!(a.state, b.state);
+        assert_eq!(a.damage_summary(), b.damage_summary());
+        assert_eq!(a.damage_history(), b.damage_history());
+        assert_eq!(a.compartments(), b.compartments());
+    }
+
     use super::*;
 
     fn assert_approx_eq(actual: f32, expected: f32) {
@@ -790,7 +996,9 @@ mod tests {
             }
             let events = first.tick(0.05);
             assert_eq!(events, second.tick(0.05));
-            heard_ping |= events.iter().any(|e| matches!(e, GameEvent::SonarPingHeard { .. }));
+            heard_ping |= events
+                .iter()
+                .any(|e| matches!(e, GameEvent::SonarPingHeard { .. }));
             assert_eq!(first.world, second.world);
             assert_eq!(first.sonar_measurements(), second.sonar_measurements());
         }

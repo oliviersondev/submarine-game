@@ -600,6 +600,7 @@ mod tests {
                 dive_state: shared::DiveState::Submerged,
                 acoustic_level: shared::AcousticLevel::Silent,
                 alerts: vec![],
+                damage: shared::DamageSummary::default(),
             },
             pilot: None,
             engineering: Some(shared::EngineeringMeasurements {
@@ -613,6 +614,8 @@ mod tests {
                 oxygen: 80.0,
                 electrical_load: 0.1,
                 air_intake_available: false,
+                compartments: [shared::CompartmentState::default(); 3],
+                damage_history: vec![],
             }),
         };
 

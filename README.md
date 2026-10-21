@@ -136,7 +136,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `6`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. La version 4 a introduit les commandes explicites d'armement, la configuration des torpilles, l'autorisation du Capitaine, les projections des tubes et les accusés de réception. La version 5 a ajouté les causes structurées d'échec des solutions de tir. La version 6 distingue présence d'une munition et configuration du tube, centralise la profondeur maximale d'impact et précise les refus d'autorisation/profondeur. Serveur et client doivent être mis à jour ensemble.
+Chaque enveloppe porte `version: u16` (actuellement `8`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 ajoute la doctrine des charges, les dégâts persistants, les compartiments et leur historique, les alertes d'avarie et le refus des commandes après destruction. Serveur et client doivent être mis à jour ensemble ; v8 est incompatible avec v7.
 
 ### Client → Serveur (`ClientPayload`)
 
@@ -191,8 +191,9 @@ make build-wasm
 - [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v7 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, pings entendus, accusés et ticks numérotés
-- [x] Recherche acoustique de l'escorte, sonar actif ennemi et retour au convoi après perte de contact (M5.1, sans riposte armée)
+- [x] Protocole v8 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, pings et explosions entendus, dégâts persistants, accusés et ticks numérotés
+- [x] Recherche acoustique de l'escorte, sonar actif ennemi et retour au convoi après perte de contact (M5.1)
+- [x] Riposte par charges non guidées, dégâts de coque, compartiments et voies d'eau avec dérive de profondeur (M5.2 ; réparations prévues en M5.3)
 - [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
 - [x] Convoi, observations, pistes incertaines et poste Sonar tactile (M3)
 - [x] Tubes, solution de tir, autorisation, torpilles et impacts simulés (M4)

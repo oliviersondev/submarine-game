@@ -109,11 +109,11 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 |---|---|---|
 | Lobby | registre en mémoire, codes courts, rôles uniques, prêts, démarrage explicite dès un joueur et bots | persistance et reprise éventuelles |
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
-| Navigation | consignes et valeurs réelles, inertie, plongée, ballasts et remontée d'urgence | assiette, stabilité et effets des avaries |
+| Navigation | consignes et valeurs réelles, inertie, plongée, ballasts, remontée d'urgence et dérive liée à l'inondation | assiette et stabilité |
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
 | Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
-| Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation et recharge | distribution détaillée, compartiments, avaries et réparations temporisées |
-| IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche et retour au convoi | bots de poste complets et attaque tactique ennemie |
+| Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation, recharge, compartiments, voies d'eau et historique de dégâts | pompage, isolation, réparations, incendies et pannes |
+| IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche, attaque non guidée et retour au convoi | bots de poste complets et tactiques enrichies |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
 | Protocole | version 7, identifiants opaques, projections par rôle, diagnostics d'armement, pings entendus et accusés de commandes | reprise et négociation de compatibilité |
 
@@ -176,6 +176,10 @@ M5.1 ajoute `enemy_ai.rs`, propriétaire privé des états escorte/suspicion/rec
 L'ordre du tick est stable : mouvement/ressources/bruit du joueur, vieillissement de la mémoire ennemie, écoute et éventuel ping ennemi, décision et déplacement des navires, suivi Sonar joueur, puis torpilles/impacts et alertes. Une alerte d'impact est donc exploitée au tick suivant. Les erreurs de mesure dérivent de la graine et du tick, sans horloge murale.
 
 Le protocole v7, incompatible v6, ajoute `MissionConfig::escort` (`EscortConfig`, données légères uniquement) et `GameEvent::SonarPingHeard { bearing, bearing_uncertainty }`. La réception d'une émission et la production d'un écho ennemi sont indépendantes. L'événement public ne contient ni identité, ni position exacte, ni succès de détection ; le serveur le filtre vers Capitaine/Sonar seulement. Les deux postes affichent les trois derniers pings depuis l'historique client borné à 64 événements. Aucun état de l'IA ni sa piste privée ne traverse le réseau ; aucune nouvelle commande joueur n'est introduite.
+
+M5.2 étend `enemy_ai.rs` avec une passe d'attaque sur estimation figée, fraîcheur/précision minimales, stock et cadence. Le budget de recherche inclut les attaques. Les profondeurs de largage viennent de la doctrine, pas de l'état joueur. `depth_charges.rs` fait descendre des charges horizontalement fixes ; `Simulation` résout ensuite leurs effets avec la position réelle, sans renvoyer ce résultat à l'IA. Une escorte détruite ne largue plus, mais les charges existantes continuent. `damage.rs` possède les compartiments, les fuites, l'inondation, la destruction et un historique borné à 64 faits ; `SubmarineState::hull_integrity` reste la valeur de coque autoritaire. La dérive d'inondation s'ajoute à la dynamique verticale. La destruction fige la simulation hors ticks et bloque commandes et automatismes ; le cycle complet de fin de mission reste en M6.
+
+Le protocole v8 est incompatible v7. `EscortConfig::attack` et `MissionConfig::damage` portent les réglages ; les types partagés restent des données légères. `CommonMeasurements::damage` transmet coque, inondation moyenne, destruction et dernière cause à tous les postes. `EngineeringMeasurements` ajoute les trois compartiments et l'historique complet borné : les avaries ne dépendent pas de l'arrivée d'un événement éphémère. Les alertes de coque, voie d'eau et destruction sont également répétées dans les snapshots. `DepthChargeHeard` est une simple perception sonore réservée à Capitaine/Sonar ; il ne porte aucune identité, coordonnée ou confirmation d'impact. `SubmarineDamaged` et `SubmarineDestroyed` décrivent uniquement le sous-marin joueur et sont diffusés à tous. Le client affiche un bandeau de synthèse dans les postes plein écran, le détail dans le poste Ingénierie défilant et refuse avec un message explicite les commandes après destruction. Aucun détail de charge ou d'IA n'est projeté.
 
 **Composants cibles :**
 
@@ -413,7 +417,7 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | TD-01 | URL WebSocket locale codée en dur | résolu en M1 | URL dérivée de l'origine et configuration native `WS_URL` |
 | TD-02 | lobby global et démarrage à cinq joueurs | résolu en M1 | registre en mémoire, prêts, démarrage explicite et bots |
 | TD-03 | protocole non versionné | résolu en M1, évolué en M2 | version 2 et fixtures exactes `postcard` |
-| TD-04 | réparation encore symbolique et riposte d'escorte absente | boucle de survie incomplète | implémenter M5 |
+| TD-04 | réparation encore symbolique ; riposte et dégâts livrés en M5.2 | boucle de survie incomplète | implémenter le contrôle des avaries M5.3 |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
 
 ## 12. Glossaire
