@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{BallastState, CrewRole, MissionSnapshot, SubmarineConfig, SystemId, TrackId};
 
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -21,6 +21,8 @@ pub struct MissionConfig {
     pub seed: u64,
     pub submarine: SubmarineConfig,
     pub weapons: crate::WeaponsConfig,
+    pub escort: EscortConfig,
+    pub damage: DamageConfig,
 }
 
 impl MissionConfig {
@@ -29,6 +31,139 @@ impl MissionConfig {
             seed,
             submarine: SubmarineConfig::default(),
             weapons: crate::WeaponsConfig::default(),
+            escort: EscortConfig::default(),
+            damage: DamageConfig::default(),
+        }
+    }
+}
+
+/// Provisional M5 tuning. Distances in metres, times in seconds, speeds in knots.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct EscortConfig {
+    pub passive_range: f32,
+    pub ping_hearing_range: f32,
+    pub active_range: f32,
+    pub explosion_hearing_range: f32,
+    pub passive_interval: f32,
+    pub ping_interval: f32,
+    pub track_lifetime: f32,
+    pub suspicion_duration: f32,
+    pub search_duration: f32,
+    pub return_grace: f32,
+    /// Confidence points lost per second (confidence is bounded to 0..=100).
+    pub confidence_decay: f32,
+    pub search_confidence: f32,
+    /// Metres of additional uncertainty per second without a new observation.
+    pub uncertainty_growth: f32,
+    pub search_speed: f32,
+    pub return_speed: f32,
+    /// Degrees per second.
+    pub turn_rate: f32,
+    /// Knots per second, also used for deceleration.
+    pub acceleration: f32,
+    pub attack: EscortAttackConfig,
+}
+
+impl Default for EscortConfig {
+    fn default() -> Self {
+        Self {
+            passive_range: 6_000.0,
+            ping_hearing_range: 10_000.0,
+            active_range: 3_000.0,
+            explosion_hearing_range: 3_000.0,
+            passive_interval: 1.0,
+            ping_interval: 12.0,
+            track_lifetime: 60.0,
+            suspicion_duration: 30.0,
+            search_duration: 180.0,
+            return_grace: 20.0,
+            confidence_decay: 1.0,
+            search_confidence: 55.0,
+            uncertainty_growth: 8.0,
+            search_speed: 8.0,
+            return_speed: 15.0,
+            turn_rate: 5.0,
+            acceleration: 0.75,
+            attack: EscortAttackConfig::default(),
+        }
+    }
+}
+
+/// Enemy doctrine: preset depths, never the player's actual depth.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct EscortAttackConfig {
+    pub confidence: f32,
+    pub max_uncertainty: f32,
+    pub max_track_age: f32,
+    pub release_range: f32,
+    pub cooldown: f32,
+    pub salvos: u8,
+    pub depth: f32,
+    pub depth_spacing: f32,
+    pub sink_speed: f32,
+    pub arming_time: f32,
+    pub blast_radius: f32,
+    pub hearing_range: f32,
+    pub damage: f32,
+}
+
+impl Default for EscortAttackConfig {
+    fn default() -> Self {
+        Self {
+            confidence: 70.0,
+            max_uncertainty: 350.0,
+            max_track_age: 15.0,
+            release_range: 120.0,
+            cooldown: 30.0,
+            salvos: 6,
+            depth: 100.0,
+            depth_spacing: 40.0,
+            sink_speed: 5.0,
+            arming_time: 3.0,
+            blast_radius: 120.0,
+            hearing_range: 3_000.0,
+            damage: 24.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DamageConfig {
+    /// Compartment flooding percentage/second added per hull damage point.
+    pub breach_per_damage: f32,
+    /// Downward drift in m/s at 100% mean flooding.
+    pub flooding_sink_speed: f32,
+    pub crush_damage_per_second: f32,
+    pub pump_rate: f32,
+    pub pump_battery_drain: f32,
+    pub pump_noise: f32,
+    pub seal_seconds: f32,
+    pub extinguish_seconds: f32,
+    pub repair_seconds: f32,
+    pub fire_growth: f32,
+    pub fire_spread: f32,
+    pub flooding_transfer: f32,
+    pub fire_damage_per_second: f32,
+    pub fire_oxygen_drain: f32,
+}
+
+impl Default for DamageConfig {
+    fn default() -> Self {
+        Self {
+            breach_per_damage: 0.003,
+            flooding_sink_speed: 4.0,
+            crush_damage_per_second: 2.0,
+            pump_rate: 0.6,
+            pump_battery_drain: 0.04,
+            pump_noise: 8.0,
+            seal_seconds: 20.0,
+            extinguish_seconds: 18.0,
+            repair_seconds: 25.0,
+            fire_growth: 0.15,
+            fire_spread: 0.05,
+            flooding_transfer: 0.01,
+            fire_damage_per_second: 0.3,
+            fire_oxygen_drain: 0.01,
         }
     }
 }
@@ -81,6 +216,19 @@ pub enum PlayerCommand {
     OrderWeaponsBot {
         target: TrackId,
     },
+    SetCompartmentPump {
+        compartment: u8,
+        enabled: bool,
+    },
+    SetCompartmentIsolated {
+        compartment: u8,
+        isolated: bool,
+    },
+    StartDamageControl {
+        compartment: u8,
+        action: crate::DamageControlAction,
+    },
+    CancelDamageControl,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,9 +238,29 @@ pub enum GameEvent {
     EmergencySurfaceStarted,
     SystemDamaged(SystemId),
     SystemRepaired(SystemId),
-    TorpedoFired { bearing: f32 },
-    TorpedoImpact { torpedo_id: u64 },
-    TorpedoExpired { torpedo_id: u64 },
+    TorpedoFired {
+        bearing: f32,
+    },
+    TorpedoImpact {
+        torpedo_id: u64,
+    },
+    TorpedoExpired {
+        torpedo_id: u64,
+    },
+    /// An audible emission, not confirmation of an enemy echo or identification.
+    SonarPingHeard {
+        bearing: f32,
+        bearing_uncertainty: f32,
+    },
+    /// Audible blast only: no weapon/source identity, coordinates or hit result.
+    /// Wire index 9 is unchanged from the former `DepthChargeHeard` name.
+    ExplosionHeard,
+    SubmarineDamaged {
+        cause: crate::DamageCause,
+    },
+    SubmarineDestroyed {
+        cause: crate::DamageCause,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -125,6 +293,13 @@ pub enum ProtocolError {
     TargetOutsideTubeSector,
     AuthorizationSettingsMismatch,
     TorpedoDepthExceedsImpactZone { maximum_meters: f32 },
+    SubmarineDestroyed,
+    InvalidCompartment,
+    DamageControlBusy,
+    NoDamageToRepair,
+    UnsafeCompartment,
+    SystemUnavailable(SystemId),
+    InsufficientBattery,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -244,6 +419,62 @@ mod tests {
     use crate::codec::{decode, encode};
 
     #[test]
+    fn version_nine_damage_control_commands_have_stable_fixtures() {
+        for (command, bytes) in [
+            (
+                PlayerCommand::SetCompartmentPump {
+                    compartment: 2,
+                    enabled: true,
+                },
+                vec![9, 1, 0, 9, 23, 2, 1],
+            ),
+            (
+                PlayerCommand::SetCompartmentIsolated {
+                    compartment: 1,
+                    isolated: true,
+                },
+                vec![9, 1, 0, 9, 24, 1, 1],
+            ),
+            (
+                PlayerCommand::StartDamageControl {
+                    compartment: 1,
+                    action: crate::DamageControlAction::SealBreach,
+                },
+                vec![9, 1, 0, 9, 25, 1, 0],
+            ),
+            (PlayerCommand::CancelDamageControl, vec![9, 1, 0, 9, 26]),
+        ] {
+            let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
+                command_id: CommandId(9),
+                command,
+            }));
+            assert_eq!(encode(&message), bytes);
+            assert_eq!(decode::<ClientMessage>(&bytes).unwrap(), message);
+        }
+        let status = crate::DamageControlStatus {
+            intervention: Some(crate::Intervention {
+                compartment: 1,
+                action: crate::DamageControlAction::RepairSystem(SystemId::Sonar),
+                remaining: 12.0,
+                duration: 25.0,
+                paused: true,
+            }),
+            systems: vec![(
+                SystemId::Sonar,
+                crate::SystemStatus {
+                    operational: false,
+                    power: 0.0,
+                },
+            )],
+            faults: vec![SystemId::Sonar],
+        };
+        assert_eq!(
+            decode::<crate::DamageControlStatus>(&encode(&status)).unwrap(),
+            status
+        );
+    }
+
+    #[test]
     fn protocol_messages_round_trip() {
         let messages = [
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
@@ -273,32 +504,32 @@ mod tests {
     }
 
     #[test]
-    fn version_six_fixtures_detect_enum_reordering() {
+    fn version_nine_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![6, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![6, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[6, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[6, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![9, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![9, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[9, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[9, 0, 2, 1]).unwrap(), ready);
     }
 
     #[test]
-    fn version_six_m2_command_fixture_is_stable() {
+    fn version_nine_m2_command_fixture_is_stable() {
         let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::SetBallast(BallastState::Flood),
         }));
-        let fixture = vec![6, 1, 0, 9, 3, 0];
+        let fixture = vec![9, 1, 0, 9, 3, 0];
         assert_eq!(encode(&message), fixture);
         assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
     }
 
     #[test]
-    fn version_six_weapons_and_acknowledgment_fixtures_are_stable() {
+    fn version_nine_weapons_and_acknowledgment_fixtures_are_stable() {
         let load = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::LoadTube(0),
@@ -308,8 +539,8 @@ mod tests {
             command: PlayerCommand::FireTorpedo { tube: 0 },
         }));
         for (message, fixture) in [
-            (load, vec![6, 1, 0, 9, 15, 0]),
-            (fire, vec![6, 1, 0, 9, 9, 0]),
+            (load, vec![9, 1, 0, 9, 15, 0]),
+            (fire, vec![9, 1, 0, 9, 9, 0]),
         ] {
             assert_eq!(encode(&message), fixture);
             assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
@@ -317,8 +548,8 @@ mod tests {
         let ack = ServerMessage::new(ServerPayload::CommandAccepted {
             command_id: CommandId(9),
         });
-        assert_eq!(encode(&ack), vec![6, 0, 9]);
-        assert_eq!(decode::<ServerMessage>(&[6, 0, 9]).unwrap(), ack);
+        assert_eq!(encode(&ack), vec![9, 0, 9]);
+        assert_eq!(decode::<ServerMessage>(&[9, 0, 9]).unwrap(), ack);
         let configured = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(10),
             command: PlayerCommand::ConfigureShot {
@@ -333,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn version_six_mission_snapshot_round_trips() {
+    fn version_nine_mission_snapshot_round_trips() {
         let message = ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id: 3,
             tick: 7,
@@ -348,6 +579,7 @@ mod tests {
                         dive_state: crate::DiveState::Periscope,
                         acoustic_level: crate::AcousticLevel::Low,
                         alerts: vec![crate::AlertKind::BatteryLow],
+                        damage: crate::DamageSummary::default(),
                     },
                     pilot: Some(crate::PilotMeasurements {
                         ordered_heading: 90.0,
@@ -368,5 +600,71 @@ mod tests {
             },
         });
         assert_eq!(decode::<ServerMessage>(&encode(&message)).unwrap(), message);
+    }
+
+    #[test]
+    fn version_nine_ping_fixture_and_mission_config_round_trip() {
+        let ping = ServerMessage::new(ServerPayload::Event {
+            tick: 42,
+            event: GameEvent::SonarPingHeard {
+                bearing: 90.0,
+                bearing_uncertainty: 3.0,
+            },
+        });
+        let fixture = vec![9, 5, 42, 8, 0, 0, 180, 66, 0, 0, 64, 64];
+        assert_eq!(encode(&ping), fixture);
+        assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), ping);
+        let message = ServerMessage::new(ServerPayload::MissionStarted {
+            config: MissionConfig::new(123),
+        });
+        assert_eq!(decode::<ServerMessage>(&encode(&message)).unwrap(), message);
+    }
+
+    #[test]
+    fn version_nine_damage_events_have_stable_fixtures() {
+        for (event, fixture) in [
+            (GameEvent::ExplosionHeard, vec![9, 5, 42, 9]),
+            (
+                GameEvent::SubmarineDamaged {
+                    cause: crate::DamageCause::DepthCharge,
+                },
+                vec![9, 5, 42, 10, 0],
+            ),
+            (
+                GameEvent::SubmarineDestroyed {
+                    cause: crate::DamageCause::Flooding,
+                },
+                vec![9, 5, 42, 11, 2],
+            ),
+        ] {
+            let message = ServerMessage::new(ServerPayload::Event { tick: 42, event });
+            assert_eq!(encode(&message), fixture);
+            assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), message);
+        }
+        let engineering = crate::EngineeringMeasurements {
+            propulsion: crate::PropulsionState::default(),
+            battery: 80.0,
+            oxygen: 70.0,
+            electrical_load: 0.1,
+            air_intake_available: false,
+            compartments: [crate::CompartmentState {
+                integrity: 80.0,
+                flooding: 12.0,
+                breach_rate: 0.06,
+                ..Default::default()
+            }; 3],
+            damage_history: vec![crate::DamageRecord {
+                tick: 42,
+                cause: crate::DamageCause::DepthCharge,
+                hull_damage: 20.0,
+                compartment: Some(1),
+                destroyed: false,
+            }],
+            damage_control: crate::DamageControlStatus::default(),
+        };
+        assert_eq!(
+            decode::<crate::EngineeringMeasurements>(&encode(&engineering)).unwrap(),
+            engineering
+        );
     }
 }

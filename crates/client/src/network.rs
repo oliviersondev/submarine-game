@@ -175,6 +175,8 @@ pub struct GameState {
     pub last_error: Option<ProtocolError>,
     /// Historique borne, conserve tous les evenements d'un meme lot reseau.
     pub events: VecDeque<(u64, GameEvent)>,
+    /// Monotonic receipt counter: bursts must survive eviction from the event history.
+    pub audible_explosions: u64,
 }
 
 pub struct NetworkPlugin;
@@ -447,6 +449,9 @@ fn handle_server_message(
             }
         }
         ServerPayload::Event { tick, event } => {
+            if matches!(event, GameEvent::ExplosionHeard) {
+                state.audible_explosions = state.audible_explosions.saturating_add(1);
+            }
             state.server_tick = state.server_tick.max(tick);
             debug!("GameEvent: {event:?}");
             const EVENT_HISTORY_CAPACITY: usize = 64;
@@ -513,6 +518,28 @@ pub fn controls_for_role(role: CrewRole) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explosion_receipt_counter_preserves_bursts_even_after_history_eviction() {
+        let mut player = LocalPlayer::default();
+        let mut state = GameState::default();
+        let mut commands = CommandQueue::default();
+        for _ in 0..130 {
+            for event in [
+                GameEvent::ExplosionHeard,
+                GameEvent::TorpedoImpact { torpedo_id: 1 },
+            ] {
+                handle_server_message(
+                    ServerPayload::Event { tick: 10, event },
+                    &mut player,
+                    &mut state,
+                    &mut commands,
+                );
+            }
+        }
+        assert_eq!(state.audible_explosions, 130);
+        assert_eq!(state.events.len(), 64);
+    }
 
     #[test]
     fn a_batch_keeps_all_events_in_order_and_history_is_bounded() {
@@ -600,6 +627,7 @@ mod tests {
                 dive_state: shared::DiveState::Submerged,
                 acoustic_level: shared::AcousticLevel::Silent,
                 alerts: vec![],
+                damage: shared::DamageSummary::default(),
             },
             pilot: None,
             engineering: Some(shared::EngineeringMeasurements {
@@ -613,6 +641,9 @@ mod tests {
                 oxygen: 80.0,
                 electrical_load: 0.1,
                 air_intake_available: false,
+                compartments: [shared::CompartmentState::default(); 3],
+                damage_history: vec![],
+                damage_control: shared::DamageControlStatus::default(),
             }),
         };
 
