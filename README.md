@@ -136,7 +136,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `8`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 ajoute la doctrine des charges, les dégâts persistants, les compartiments et leur historique, les alertes d'avarie et le refus des commandes après destruction. Serveur et client doivent être mis à jour ensemble ; v8 est incompatible avec v7.
+Chaque enveloppe porte `version: u16` (actuellement `9`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 a ajouté les charges, dégâts persistants, compartiments et alertes. La version 9 ajoute le contrôle des avaries, les incendies et les pannes : pompage, isolation, équipe unique et interventions temporisées. Serveur et client doivent être mis à jour ensemble ; v9 est incompatible avec v8.
 
 ### Client → Serveur (`ClientPayload`)
 
@@ -191,9 +191,10 @@ make build-wasm
 - [x] Interpolation client entre les snapshots projetés
 - [x] Validation des commandes par rôle (`game_room.rs`)
 - [x] Salles éphémères, démarrage solo et bots de postes vacants (M1)
-- [x] Protocole v8 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, pings et explosions entendus, dégâts persistants, accusés et ticks numérotés
+- [x] Protocole v9 avec fixtures `postcard`, projections par rôle, diagnostics d'armement, pings et explosions entendus, dégâts persistants, interventions, accusés et ticks numérotés
 - [x] Recherche acoustique de l'escorte, sonar actif ennemi et retour au convoi après perte de contact (M5.1)
-- [x] Riposte par charges non guidées, dégâts de coque, compartiments et voies d'eau avec dérive de profondeur (M5.2 ; réparations prévues en M5.3)
+- [x] Riposte par charges non guidées, dégâts de coque, compartiments et voies d'eau avec dérive de profondeur (M5.2)
+- [x] Pompage, isolation, colmatage/extinction/réparation temporisés, pannes et bot Ingénierie (M5.3 ; [recette](docs/recette-m5.3.md))
 - [x] Navigation inertielle, plongée, endurance, bruit et alertes (M2)
 - [x] Convoi, observations, pistes incertaines et poste Sonar tactile (M3)
 - [x] Tubes, solution de tir, autorisation, torpilles et impacts simulés (M4)

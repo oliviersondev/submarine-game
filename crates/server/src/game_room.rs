@@ -139,6 +139,10 @@ fn command_allowed_for_role(role: CrewRole, command: &PlayerCommand) -> bool {
         ) | (
             CrewRole::Engineer,
             PlayerCommand::RepairSystem(_)
+                | PlayerCommand::SetCompartmentPump { .. }
+                | PlayerCommand::SetCompartmentIsolated { .. }
+                | PlayerCommand::StartDamageControl { .. }
+                | PlayerCommand::CancelDamageControl
                 | PlayerCommand::SetDiesels(_)
                 | PlayerCommand::SetElectricMotors(_)
                 | PlayerCommand::SetVentilation(_)
@@ -266,6 +270,7 @@ fn project_submarine(sim: &Simulation, role: CrewRole) -> SubmarineSnapshot {
         air_intake_available: sim.air_intake_available(),
         compartments: sim.compartments(),
         damage_history: sim.damage_history(),
+        damage_control: sim.damage_control_status(),
     });
     SubmarineSnapshot {
         common,
@@ -284,6 +289,35 @@ mod tests {
             role,
             command_id: CommandId(7),
             action,
+        }
+    }
+
+    #[test]
+    fn damage_control_commands_are_engineer_only() {
+        use shared::DamageControlAction;
+        let commands = [
+            PlayerCommand::SetCompartmentPump {
+                compartment: 0,
+                enabled: true,
+            },
+            PlayerCommand::SetCompartmentIsolated {
+                compartment: 0,
+                isolated: true,
+            },
+            PlayerCommand::StartDamageControl {
+                compartment: 0,
+                action: DamageControlAction::SealBreach,
+            },
+            PlayerCommand::CancelDamageControl,
+            PlayerCommand::RepairSystem(shared::SystemId::Engine),
+        ];
+        for command in commands {
+            for role in CrewRole::ALL {
+                assert_eq!(
+                    command_allowed_for_role(role, &command),
+                    role == CrewRole::Engineer
+                );
+            }
         }
     }
 

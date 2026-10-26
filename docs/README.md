@@ -8,6 +8,8 @@ Pour prendre en main le jeu : **[Guide joueur — Armement et première attaque]
 
 Pour valider la riposte et les dégâts : **[Recette M5.2](recette-m5.2.md)**.
 
+Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.3.md)** (pompes, isolation, incendies, pannes et bot Ingénierie).
+
 | Document | Objet | Statut |
 |---|---|---|
 | [Game Design Document](game-design.md) | vision, boucle de jeu, rôles, règles et expérience mobile | brouillon 0.1 |

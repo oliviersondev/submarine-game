@@ -23,6 +23,9 @@ struct HudText;
 struct HudPanel;
 
 #[derive(Component)]
+struct HudScrollStart(Vec2);
+
+#[derive(Component)]
 struct RoleSelector;
 
 #[derive(Component)]
@@ -287,35 +290,66 @@ fn setup_scene(mut commands: Commands, player: Res<LocalPlayer>) {
         Transform::default(),
     ));
 
-    commands.spawn((
-        HudPanel,
-        HudText,
-        Text::new("SUBMARINE // CONNEXION"),
-        TextFont {
-            font_size: FontSize::Px(17.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.82, 0.95, 1.0)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(16),
-            left: px(16),
-            right: px(16),
-            max_width: px(520),
-            padding: UiRect::all(px(14)),
-            border: UiRect::all(px(1)),
-            border_radius: BorderRadius::all(px(6)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.9)),
-        BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.75)),
-        GlobalZIndex(20),
-        if player.id.is_some() {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        },
-    ));
+    commands
+        .spawn((
+            HudPanel,
+            HudScrollStart(Vec2::ZERO),
+            ScrollPosition(Vec2::ZERO),
+            RelativeCursorPosition::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(16),
+                left: px(16),
+                right: px(16),
+                max_width: px(520),
+                padding: UiRect::all(px(14)),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(6)),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::scroll_y(),
+                scrollbar_width: 6.0,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.015, 0.06, 0.09, 0.9)),
+            BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.75)),
+            GlobalZIndex(20),
+            if player.id.is_some() {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
+        ))
+        .observe(
+            |drag: On<Pointer<Drag>>,
+             scale: Res<UiScale>,
+             mut panel: Single<
+                (&ComputedNode, &mut ScrollPosition, &HudScrollStart),
+                With<HudPanel>,
+            >| {
+                let range = (panel.0.content_size.y - panel.0.size.y).max(0.0)
+                    * panel.0.inverse_scale_factor;
+                panel.1 .0.y = (panel.2 .0.y - drag.distance.y / scale.0).clamp(0.0, range);
+            },
+        )
+        .observe(
+            |_: On<Pointer<DragStart>>,
+             mut panel: Single<(&ComputedNode, &mut HudScrollStart), With<HudPanel>>| {
+                panel.1 .0 = panel.0.scroll_position * panel.0.inverse_scale_factor;
+            },
+        )
+        .with_child((
+            HudText,
+            Text::new("SUBMARINE // CONNEXION"),
+            TextFont {
+                font_size: FontSize::Px(17.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.82, 0.95, 1.0)),
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
 
     spawn_role_selector(&mut commands, &player);
 
@@ -735,6 +769,11 @@ fn update_station_layout(
 
     for (mut node, hud, pilot, engineer, sonar, tactical, body, sonar_body) in &mut nodes {
         if hud.is_some() {
+            node.max_height = if state.game_started && !landscape {
+                px(200)
+            } else {
+                Val::Auto
+            };
             node.left = px(16);
             node.top = px(16);
             if landscape {
@@ -999,7 +1038,7 @@ fn spawn_engineer_station(commands: &mut Commands, player: &LocalPlayer) {
         })
         .with_children(|panel| {
             panel.spawn((
-                Text::new("POSTE INGENIERIE // ENDURANCE"),
+                Text::new("POSTE INGENIERIE // AVARIES"),
                 Node { flex_shrink: 0.0, ..default() },
                 TextFont {
                     font_size: FontSize::Px(16.0),
@@ -1055,6 +1094,7 @@ fn spawn_engineer_station(commands: &mut Commands, player: &LocalPlayer) {
                         ));
                     }
                 });
+            crate::damage_control_ui::spawn(panel);
         });
 }
 
@@ -1415,6 +1455,7 @@ fn scroll_sonar_tracks(
             With<SonarObservationLog>,
             With<EngineerPanel>,
             With<PilotPanel>,
+            With<HudPanel>,
         )>,
     >,
 ) {
@@ -1828,12 +1869,14 @@ fn update_sonar_station(
     };
     ui.retain_tracks(&sonar.tracks);
     summary.0 = format!(
-        "BRUIT PROPRE {:>5.1} // PING {}",
+        "BRUIT {:>5.1} // {}",
         sonar.own_noise,
-        if sonar.ping_cooldown_remaining > 0.0 {
-            format!("RECHARGE {:.1}s", sonar.ping_cooldown_remaining)
+        if !sonar.operational {
+            "SONAR HS".to_owned()
+        } else if sonar.ping_cooldown_remaining > 0.0 {
+            format!("PING {:.1}s", sonar.ping_cooldown_remaining)
         } else {
-            "PRET".to_owned()
+            "PING PRET".to_owned()
         }
     );
     observations.0 = observation_list(&sonar.observations);
@@ -1876,7 +1919,9 @@ fn update_sonar_station(
     for (action, mut text, mut background) in &mut actions {
         let enabled = sonar_action_enabled(*action, sonar, &ui);
         if matches!(action, SonarAction::Ping) {
-            text.0 = if enabled {
+            text.0 = if !sonar.operational {
+                "SONAR INDISP.".to_owned()
+            } else if enabled {
                 "PING".to_owned()
             } else {
                 format!("PING {:.1}s", sonar.ping_cooldown_remaining.max(0.0))
@@ -2045,7 +2090,7 @@ fn sonar_action_enabled(
     ui: &SonarUiState,
 ) -> bool {
     match action {
-        SonarAction::Ping => sonar.ping_cooldown_remaining <= 0.0,
+        SonarAction::Ping => sonar.operational && sonar.ping_cooldown_remaining <= 0.0,
         SonarAction::Share | SonarAction::Drop => ui.primary.is_some(),
         SonarAction::Merge => match (ui.primary, ui.secondary) {
             (Some(primary), Some(secondary)) => {
@@ -2534,11 +2579,18 @@ fn engineering_text(engineering: &EngineeringMeasurements) -> String {
         .enumerate()
         .map(|(index, compartment)| {
             format!(
-                "{} : ETAT {:.0}% / EAU {:.1}% / FUITE {:.3}%/s",
+                "{} : ETAT {:.0}% / EAU {:.1}% / FUITE {:.3}%/s\nFEU {:.0}% / ISOLE {} / POMPE {}",
                 ["AVANT", "CENTRAL", "MACHINES"][index],
                 compartment.integrity,
                 compartment.flooding,
-                compartment.breach_rate
+                compartment.breach_rate,
+                compartment.fire,
+                on_off(compartment.isolated),
+                if compartment.pumping && engineering.battery <= 0.0 {
+                    "SANS COURANT"
+                } else {
+                    on_off(compartment.pumping)
+                }
             )
         })
         .collect::<Vec<_>>()
@@ -2550,7 +2602,7 @@ fn engineering_text(engineering: &EngineeringMeasurements) -> String {
         .take(2)
         .map(|record| {
             format!(
-                "t{} : {} / COQUE -{:.1}{}",
+                "t{} : {} / COQUE -{:.2}{}",
                 record.tick,
                 damage_cause_label(record.cause),
                 record.hull_damage,
@@ -2559,7 +2611,48 @@ fn engineering_text(engineering: &EngineeringMeasurements) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!("{endurance}\n{compartments}\nAVARIES PERSISTANTES // REPARATIONS : M5.3\n{history}")
+    let systems = engineering
+        .damage_control
+        .systems
+        .iter()
+        .map(|(id, status)| {
+            format!(
+                "{} {}",
+                crate::damage_control_ui::system_label(*id),
+                if engineering.damage_control.faults.contains(id) {
+                    "EN PANNE"
+                } else if status.operational {
+                    "OK"
+                } else {
+                    "ISOLE / FEU / EAU"
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let team = engineering
+        .damage_control
+        .intervention
+        .map(|task| {
+            let action = match task.action {
+                shared::DamageControlAction::SealBreach => "COLMATAGE",
+                shared::DamageControlAction::Extinguish => "EXTINCTION",
+                shared::DamageControlAction::RepairSystem(_) => "REPARATION SYSTEME",
+            };
+            format!(
+                "EQUIPE : {action} {} / {:.1}s sur {:.0}s{}",
+                ["AVANT", "CENTRAL", "MACHINES"][task.compartment as usize],
+                task.remaining,
+                task.duration,
+                if task.paused {
+                    " / SUSPENDU : COMPARTIMENT DANGEREUX"
+                } else {
+                    ""
+                }
+            )
+        })
+        .unwrap_or("EQUIPE : DISPONIBLE / UNE INTERVENTION A LA FOIS".into());
+    format!("{endurance}\n{compartments}\n{systems}\n{team}\n{history}")
 }
 
 fn damage_cause_label(cause: shared::DamageCause) -> &'static str {
@@ -2567,6 +2660,7 @@ fn damage_cause_label(cause: shared::DamageCause) -> &'static str {
         shared::DamageCause::DepthCharge => "CHARGE DE PROFONDEUR",
         shared::DamageCause::Pressure => "PRESSION",
         shared::DamageCause::Flooding => "INONDATION",
+        shared::DamageCause::Fire => "INCENDIE",
     }
 }
 
@@ -2584,8 +2678,16 @@ fn damage_status(state: &GameState) -> String {
         .last_cause
         .map(damage_cause_label)
         .unwrap_or("AUCUNE AVARIE");
+    let hazards = if damage.fire > 0.0 || damage.unavailable_systems > 0 {
+        format!(
+            "FEU {:.0}% / SYSTEMES INDISP. {}",
+            damage.fire, damage.unavailable_systems
+        )
+    } else {
+        cause.into()
+    };
     format!(
-        "{status} {:.0}% // EAU {:.1}%\n{cause}",
+        "{status} {:.0}% // EAU {:.1}%\n{hazards}",
         damage.hull_integrity, damage.flooding
     )
 }
@@ -2718,8 +2820,8 @@ fn hud_content(player: &LocalPlayer, state: &GameState) -> String {
             role_label(role),
             status,
             lobby,
-            alerts,
-            error
+            error,
+            alerts
         )
     } else {
         format!(
@@ -2744,6 +2846,8 @@ fn alert_label(alert: &AlertKind) -> &'static str {
         AlertKind::HullDamaged => "COQUE ENDOMMAGEE",
         AlertKind::Flooding => "VOIE D'EAU",
         AlertKind::SubmarineDestroyed => "SOUS-MARIN PERDU",
+        AlertKind::Fire => "INCENDIE",
+        AlertKind::SystemFailure => "SYSTEME INDISPONIBLE",
     }
 }
 
@@ -2783,6 +2887,12 @@ pub(crate) fn error_label(error: &ProtocolError) -> String {
         ProtocolError::InvalidRoomCode => "CODE SALLE INVALIDE : 6 CHIFFRES REQUIS".to_owned(),
         ProtocolError::ConnectionFailed => "CONNEXION AU SERVEUR IMPOSSIBLE".to_owned(),
         ProtocolError::SubmarineDestroyed => "SOUS-MARIN PERDU : CREER UNE NOUVELLE SALLE".into(),
+        ProtocolError::InvalidCompartment => "COMPARTIMENT INVALIDE".into(),
+        ProtocolError::DamageControlBusy => "EQUIPE OCCUPEE : ANNULER POUR CHANGER DE PRIORITE".into(),
+        ProtocolError::NoDamageToRepair => "AUCUNE FUITE, AUCUN FEU OU AUCUNE PANNE A TRAITER".into(),
+        ProtocolError::UnsafeCompartment => "COMPARTIMENT DANGEREUX : ETEINDRE OU POMPER D'ABORD".into(),
+        ProtocolError::SystemUnavailable(id) => format!("{} INDISPONIBLE : VERIFIER PANNE, ISOLATION, FEU ET EAU", crate::damage_control_ui::system_label(*id)),
+        ProtocolError::InsufficientBattery => "BATTERIE VIDE : POMPAGE IMPOSSIBLE".into(),
         ProtocolError::TrackNotFound(track_id) => {
             format!("PISTE T{} INTROUVABLE", track_id.0)
         }
@@ -2967,6 +3077,36 @@ mod tests {
     }
 
     #[test]
+    fn portrait_hud_has_bounded_scrollable_space_separate_from_station_controls() {
+        let mut app = App::new();
+        app.insert_resource(GameState {
+            game_started: true,
+            ..default()
+        })
+        .init_resource::<LocalPlayer>()
+        .add_systems(Startup, setup_scene)
+        .add_systems(Update, update_station_layout);
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(360, 640),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.update();
+        let world = app.world_mut();
+        let mut hud = world.query_filtered::<(&Node, &ScrollPosition), With<HudPanel>>();
+        let (node, _) = hud.single(world).unwrap();
+        assert_eq!(node.max_height, px(200));
+        assert_eq!(node.top, px(16));
+        let mut pilot = world.query_filtered::<&Node, With<PilotPanel>>();
+        assert_eq!(pilot.single(world).unwrap().max_height, px(400));
+        let mut text = world.query_filtered::<&ChildOf, With<HudText>>();
+        let parent = text.single(world).unwrap().parent();
+        assert!(world.entity(parent).contains::<HudPanel>());
+    }
+
+    #[test]
     fn damage_status_survives_missing_events_and_explosions_do_not_confirm_hits() {
         let mut snapshot = pilot_snapshot(0.0, 0.0, 100.0);
         snapshot.common.damage = shared::DamageSummary {
@@ -2974,6 +3114,7 @@ mod tests {
             flooding: 3.0,
             destroyed: false,
             last_cause: Some(shared::DamageCause::DepthCharge),
+            ..default()
         };
         let mut state = GameState {
             submarine: Some(snapshot),
@@ -3008,6 +3149,7 @@ mod tests {
                 integrity: 70.0,
                 flooding: 12.0,
                 breach_rate: 0.06,
+                ..default()
             }; 3],
             damage_history: vec![shared::DamageRecord {
                 tick: 42,
@@ -3016,6 +3158,7 @@ mod tests {
                 compartment: None,
                 destroyed: false,
             }],
+            damage_control: shared::DamageControlStatus::default(),
         };
         let text = engineering_text(&engineering);
         for label in [
@@ -3026,10 +3169,26 @@ mod tests {
             "FUITE 0.060%/s",
             "t42",
             "PRESSION",
-            "M5.3",
+            "EQUIPE",
         ] {
             assert!(text.contains(label), "missing {label}");
         }
+    }
+
+    #[test]
+    fn sonar_cannot_offer_a_ping_when_the_system_is_unavailable() {
+        let sonar = shared::SonarMeasurements {
+            operational: false,
+            observations: vec![],
+            tracks: vec![],
+            own_noise: 0.0,
+            ping_cooldown_remaining: 0.0,
+        };
+        assert!(!sonar_action_enabled(
+            SonarAction::Ping,
+            &sonar,
+            &SonarUiState::default()
+        ));
     }
 
     #[test]
@@ -3072,6 +3231,7 @@ mod tests {
         app.init_resource::<SonarUiState>()
             .insert_resource(GameState {
                 sonar: Some(shared::SonarMeasurements {
+                    operational: true,
                     observations: vec![],
                     tracks: vec![],
                     own_noise: 0.0,

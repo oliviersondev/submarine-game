@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
+mod damage_control_ui;
 mod explosion_ui;
 mod network;
 mod render;
@@ -23,6 +24,7 @@ fn main() {
         .add_plugins(network::NetworkPlugin)
         .add_plugins(render::RenderPlugin)
         .add_plugins(explosion_ui::ExplosionUiPlugin)
+        .add_plugins(damage_control_ui::DamageControlUiPlugin)
         .add_plugins(weapons_ui::WeaponsUiPlugin)
         .run();
 }

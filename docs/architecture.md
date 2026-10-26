@@ -112,7 +112,7 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Navigation | consignes et valeurs réelles, inertie, plongée, ballasts, remontée d'urgence et dérive liée à l'inondation | assiette et stabilité |
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
 | Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
-| Ingénierie | diesels, moteurs électriques, batterie, oxygène, ventilation, recharge, compartiments, voies d'eau et historique de dégâts | pompage, isolation, réparations, incendies et pannes |
+| Ingénierie | endurance, compartiments, dégâts, pompage, isolation, incendies, pannes, interventions temporisées et bot d'avaries | distribution détaillée, équilibrage et ergonomie enrichie |
 | IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche, attaque non guidée et retour au convoi | bots de poste complets et tactiques enrichies |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
 | Protocole | version 7, identifiants opaques, projections par rôle, diagnostics d'armement, pings entendus et accusés de commandes | reprise et négociation de compatibilité |
@@ -184,6 +184,16 @@ Le protocole v8 est incompatible v7. `EscortConfig::attack` et `MissionConfig::d
 `explosion_ui.rs` affiche une alerte unique de trois secondes réelles, indépendante du tick serveur. Le compteur monotone de réceptions dans `GameState` permet de regrouper aussi les explosions simultanées et les rafales dépassant l'historique borné de 64 événements. Seul `ExplosionHeard` alimente ce compteur : un `TorpedoImpact` reçu en parallèle n'est pas compté deux fois. Le bandeau est non interactif (`Pickable::IGNORE`), placé en haut sur le statut et non sur les commandes, sans clignotement ni bouton de fermeture. Sa durée et son compteur sont réinitialisés hors partie ; les anciens événements ne redéclenchent pas l'alerte. Les snapshots d'avarie ne sont pas masqués par une modification de leur texte : l'alerte transitoire est séparée de l'état persistant.
 
 Le même bandeau affiche en priorité `SOUS-MARIN PERDU` sur fond rouge dès que `CommonMeasurements::damage.destroyed` est vrai. Cette alerte n'expire pas, ne dépend pas de l'événement de destruction et reste visible après une déconnexion tant que le dernier snapshot indique la perte. Elle remplace les alertes d'explosion sans empilement et disparaît quand l'état de perte est effacé ou remplacé par un nouveau snapshot sain.
+
+### M5.3 — Contrôle des avaries (26 octobre 2026)
+
+`damage.rs` reste propriétaire des compartiments et ajoute les intentions de pompe/isolation, les défauts persistants et une seule intervention temporisée. Ses commandes valident indices, disponibilité de l'équipe, présence d'une avarie et sécurité du travail. Une intervention devenue dangereuse est suspendue ; une annulation abandonne sa progression. La propagation ne consulte que les compartiments adjacents du tick précédent ; l'isolation bloque les échanges sans supprimer la fuite. La coque n'est jamais régénérée par une intervention. `Simulation` intègre consommation/bruit des pompes, consommation d'air du feu, contraintes des systèmes et transitions `SystemDamaged`/`SystemRepaired`. L'absence d'événement ne masque pas une panne : l'état projeté est complet.
+
+Le protocole **v9, incompatible v8**, ajoute les commandes `SetCompartmentPump`, `SetCompartmentIsolated`, `StartDamageControl`, `CancelDamageControl`, et rend `RepairSystem` réellement temporisé. Les champs légers de `DamageConfig` centralisent les réglages ; `CompartmentState` porte feu, isolation et demande de pompage. `EngineeringMeasurements::damage_control` expose l'intervention (cible/action/temps restant/durée/suspension) et la disponibilité des cinq systèmes. Seule l'Ingénierie reçoit ces détails ; `DamageSummary` expose aux autres postes feu moyen et nombre de systèmes indisponibles, avec alertes persistantes. Les refus de panne ou de procédure sont structurés. Le serveur conserve la validation des rôles avant toute mutation, et autorise les nouvelles commandes à l'Ingénierie uniquement.
+
+L'Ingénierie bot produit des commandes identiques à celles du joueur, sans accélération ni réparation implicite. Elle isole les avaries, demande les pompes, privilégie extinction puis colmatage puis réparation, et rouvre après contrôle du feu/de l'eau/de la fuite. Elle ne modifie aucune consigne Pilote. `damage_control_ui.rs` fournit la sélection de compartiment et les boutons tactiles dans le panneau Ingénierie existant, défilant à la molette et au glissement ; le statut d'équipe, les compartiments et les systèmes proviennent toujours du serveur. La destruction reste terminale ; bilan et relance appartiennent à M6.
+
+La projection d'Ingénierie distingue aussi les pannes persistantes (`faults`) d'une indisponibilité ambiante ou d'une isolation, pour rendre l'action de réparation compréhensible. `SonarMeasurements::operational` permet au poste Sonar d'afficher « SONAR HS » et de ne pas proposer un ping interdit, sans exposer les compartiments. Sur téléphone portrait, le HUD Pilote/Ingénierie a une hauteur bornée et son propre défilement ; ses refus apparaissent avant les autres mesures afin qu'une erreur ajoutée aux alertes ne recouvre pas les commandes de station.
 
 **Composants cibles :**
 
@@ -421,7 +431,7 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | TD-01 | URL WebSocket locale codée en dur | résolu en M1 | URL dérivée de l'origine et configuration native `WS_URL` |
 | TD-02 | lobby global et démarrage à cinq joueurs | résolu en M1 | registre en mémoire, prêts, démarrage explicite et bots |
 | TD-03 | protocole non versionné | résolu en M1, évolué en M2 | version 2 et fixtures exactes `postcard` |
-| TD-04 | réparation encore symbolique ; riposte et dégâts livrés en M5.2 | boucle de survie incomplète | implémenter le contrôle des avaries M5.3 |
+| TD-04 | riposte, dégâts et contrôle des avaries livrés en M5.1–M5.3 | recette et équilibrage à confirmer | valider la boucle de survie puis M6 |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
 
 ## 12. Glossaire

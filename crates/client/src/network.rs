@@ -643,6 +643,7 @@ mod tests {
                 air_intake_available: false,
                 compartments: [shared::CompartmentState::default(); 3],
                 damage_history: vec![],
+                damage_control: shared::DamageControlStatus::default(),
             }),
         };
 

@@ -5,7 +5,7 @@
 1. Lancer `make server` et `make client` dans deux terminaux.
 2. Ouvrir `http://127.0.0.1:8080` dans quatre onglets : Pilote (création), Sonar, Capitaine et Ingénierie (même code de salle).
 3. Passer les quatre joueurs prêts et démarrer. Garder le Capitaine humain, sans autoriser de tir : ne pas laisser un bot couler l'escorte pendant cette recette.
-4. Recharger tous les onglets après une mise à jour : le protocole v8 est incompatible v7. Chaque scénario comparatif doit repartir d'une salle neuve ; il n'y a pas encore de réparation.
+4. Recharger tous les onglets après une mise à jour : le protocole actuel est v9, incompatible v8/v7. Chaque scénario comparatif doit repartir d'une salle neuve ; ne pas réparer pendant cette recette de dégâts bruts.
 
 ## 1. État initial et approche
 
@@ -31,7 +31,7 @@ Vérifier aussi le bandeau : il disparaît après 3 secondes sans nouvelle explo
 - Après un coup, cesser les pings, s'éloigner et observer pendant une à deux minutes.
 - Vérifier que la fuite et l'inondation ne disparaissent pas avec le message d'explosion.
 - Comparer consigne de profondeur et valeur réelle : la tenue se dégrade ; une forte inondation peut dépasser la capacité de remontée. Tester la remontée d'urgence si nécessaire.
-- Ne pas attendre de pompage, isolation ou réparation : ces commandes seront livrées en M5.3.
+- Ne pas activer de pompage, isolation ou réparation pendant ce contrôle de persistance. Pour ces commandes désormais livrées, poursuivre avec [la recette M5.3](recette-m5.3.md).
 
 ## 4. Esquive, dans une nouvelle salle
 
