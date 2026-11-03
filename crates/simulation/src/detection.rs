@@ -1,6 +1,96 @@
 use shared::{AcousticProfile, ObservationId, ObservationMode, SonarObservation, SubmarineState};
 
+use crate::enemy_ai::Observation;
 use crate::world::{signed_unit, World};
+
+/// Sensor boundary: only these functions may consult the player's true position.
+pub(crate) fn enemy_passive(
+    vessel: &crate::world::Vessel,
+    submarine: &SubmarineState,
+    config: shared::EscortConfig,
+    seed: u64,
+    tick: u64,
+) -> Option<Observation> {
+    let distance = (submarine.x - vessel.x).hypot(submarine.y - vessel.y);
+    let signal = submarine.acoustic_signature - distance / 100.0 - vessel.speed * 1.5;
+    if distance > config.passive_range || signal < 12.0 {
+        return None;
+    }
+    Some(enemy_sample(
+        vessel, submarine, seed, tick, 12.0, 0.45, 18.0,
+    ))
+}
+
+pub(crate) fn enemy_hears_player_ping(
+    vessel: &crate::world::Vessel,
+    submarine: &SubmarineState,
+    config: shared::EscortConfig,
+    seed: u64,
+    tick: u64,
+) -> Option<Observation> {
+    let distance = (submarine.x - vessel.x).hypot(submarine.y - vessel.y);
+    (distance <= config.ping_hearing_range)
+        .then(|| enemy_sample(vessel, submarine, seed, tick, 6.0, 0.30, 60.0))
+}
+
+pub(crate) fn enemy_active_echo(
+    vessel: &crate::world::Vessel,
+    submarine: &SubmarineState,
+    config: shared::EscortConfig,
+    seed: u64,
+    tick: u64,
+) -> Option<Observation> {
+    // A simple slant-range limit, not a perfect horizontal fix at any depth.
+    let distance = (submarine.x - vessel.x).hypot(submarine.y - vessel.y);
+    (distance.hypot(submarine.depth) <= config.active_range)
+        .then(|| enemy_sample(vessel, submarine, seed, tick, 2.0, 0.08, 45.0))
+}
+
+fn enemy_sample(
+    vessel: &crate::world::Vessel,
+    submarine: &SubmarineState,
+    seed: u64,
+    tick: u64,
+    bearing_error: f32,
+    range_error: f32,
+    confidence: f32,
+) -> Observation {
+    let dx = submarine.x - vessel.x;
+    let dy = submarine.y - vessel.y;
+    let distance = dx.hypot(dy);
+    let channel = tick.wrapping_mul(16).wrapping_add(10);
+    let angle = dx.atan2(dy) + (signed_unit(seed, channel) * bearing_error).to_radians();
+    let uncertainty = 100.0 + distance * range_error;
+    let range = (distance + signed_unit(seed, channel + 1) * uncertainty).max(0.0);
+    Observation {
+        x: vessel.x + angle.sin() * range,
+        y: vessel.y + angle.cos() * range,
+        uncertainty: uncertainty + distance * bearing_error.to_radians(),
+        confidence,
+        tick,
+    }
+}
+
+pub(crate) fn audible_enemy_ping(
+    vessel: &crate::world::Vessel,
+    submarine: &SubmarineState,
+    config: shared::EscortConfig,
+    seed: u64,
+    tick: u64,
+) -> Option<shared::GameEvent> {
+    let dx = vessel.x - submarine.x;
+    let dy = vessel.y - submarine.y;
+    if dx.hypot(dy).hypot(submarine.depth) > config.ping_hearing_range {
+        return None;
+    }
+    let uncertainty = 3.0 + submarine.acoustic_signature * 0.04;
+    Some(shared::GameEvent::SonarPingHeard {
+        bearing: (dx.atan2(dy).to_degrees()
+            + signed_unit(seed, tick.wrapping_mul(16).wrapping_add(14)) * uncertainty)
+            .rem_euclid(360.0),
+        bearing_uncertainty: uncertainty,
+    })
+}
 
 const PASSIVE_RANGE: f32 = 8_000.0;
 const ACTIVE_RANGE: f32 = 12_000.0;

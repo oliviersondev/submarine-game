@@ -28,6 +28,24 @@ pub enum SystemId {
     Navigation,
 }
 
+impl SystemId {
+    pub const ALL: [Self; 5] = [
+        Self::Engine,
+        Self::Torpedo,
+        Self::Sonar,
+        Self::Life,
+        Self::Navigation,
+    ];
+
+    pub const fn compartment(self) -> u8 {
+        match self {
+            Self::Torpedo => 0,
+            Self::Sonar | Self::Navigation => 1,
+            Self::Engine | Self::Life => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemStatus {
     pub operational: bool,
@@ -72,13 +90,23 @@ pub enum AlertKind {
     AirCritical,
     Cavitation,
     CriticalDepth,
+    HullDamaged,
+    Flooding,
+    SubmarineDestroyed,
+    Fire,
+    SystemFailure,
 }
 
-pub const ALERT_KINDS: [AlertKind; 4] = [
+pub const ALERT_KINDS: [AlertKind; 9] = [
     AlertKind::BatteryLow,
     AlertKind::AirCritical,
     AlertKind::Cavitation,
     AlertKind::CriticalDepth,
+    AlertKind::HullDamaged,
+    AlertKind::Flooding,
+    AlertKind::SubmarineDestroyed,
+    AlertKind::Fire,
+    AlertKind::SystemFailure,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -221,6 +249,7 @@ pub struct CommonMeasurements {
     pub dive_state: DiveState,
     pub acoustic_level: AcousticLevel,
     pub alerts: Vec<AlertKind>,
+    pub damage: DamageSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -243,6 +272,97 @@ pub struct EngineeringMeasurements {
     pub oxygen: f32,
     pub electrical_load: f32,
     pub air_intake_available: bool,
+    pub compartments: [CompartmentState; 3],
+    /// Bounded authoritative history, independent of transient event delivery.
+    pub damage_history: Vec<DamageRecord>,
+    pub damage_control: DamageControlStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DamageControlAction {
+    SealBreach,
+    Extinguish,
+    RepairSystem(SystemId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Intervention {
+    pub compartment: u8,
+    pub action: DamageControlAction,
+    pub remaining: f32,
+    pub duration: f32,
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct DamageControlStatus {
+    pub intervention: Option<Intervention>,
+    pub systems: Vec<(SystemId, SystemStatus)>,
+    pub faults: Vec<SystemId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DamageCause {
+    DepthCharge,
+    Pressure,
+    Flooding,
+    Fire,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DamageSummary {
+    pub hull_integrity: f32,
+    pub flooding: f32,
+    pub destroyed: bool,
+    pub last_cause: Option<DamageCause>,
+    pub fire: f32,
+    pub unavailable_systems: u8,
+}
+
+impl Default for DamageSummary {
+    fn default() -> Self {
+        Self {
+            hull_integrity: 100.0,
+            flooding: 0.0,
+            destroyed: false,
+            last_cause: None,
+            fire: 0.0,
+            unavailable_systems: 0,
+        }
+    }
+}
+
+/// Fixed order: bow, control room, machinery. All percentages are 0..=100.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CompartmentState {
+    pub integrity: f32,
+    pub flooding: f32,
+    pub breach_rate: f32,
+    pub fire: f32,
+    pub isolated: bool,
+    pub pumping: bool,
+}
+
+impl Default for CompartmentState {
+    fn default() -> Self {
+        Self {
+            integrity: 100.0,
+            flooding: 0.0,
+            breach_rate: 0.0,
+            fire: 0.0,
+            isolated: false,
+            pumping: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DamageRecord {
+    pub tick: u64,
+    pub cause: DamageCause,
+    pub hull_damage: f32,
+    pub compartment: Option<u8>,
+    pub destroyed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -308,6 +428,7 @@ pub struct TrackEstimate {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SonarMeasurements {
+    pub operational: bool,
     pub observations: Vec<SonarObservation>,
     pub tracks: Vec<TrackEstimate>,
     pub own_noise: f32,
