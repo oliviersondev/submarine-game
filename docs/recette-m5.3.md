@@ -22,7 +22,13 @@
 5. Une fois le feu maîtrisé, **COLMATER** : après 20 s, la fuite passe à zéro, mais l'eau présente et les dégâts de coque restent.
 6. Laisser pomper jusqu'à assèchement, puis arrêter : l'eau ne doit plus remonter sans nouvelle avarie.
 
+Après extinction, si aucun système n'est indisponible, la synthèse affiche **AUCUN INCENDIE ACTIF**, même lorsque les derniers dégâts ont été causés par un incendie. Les anciens faits restent dans la section **DERNIERS DEGATS (HISTORIQUE)**, avec leur tick : ils ne signalent pas un feu actuel. Un feu strictement positif inférieur à 1% s'affiche **FEU <1%** dans la synthèse et le compartiment, jamais **FEU 0%** par arrondi.
+
+Pendant **ETEINDRE**, **COLMATER** ou **REPARER**, vérifier que seul le bouton de l'intervention active du compartiment sélectionné est vert et se remplit de gauche à droite. Le libellé affiche le pourcentage accompli : 13,5 s restantes sur 18 s correspondent à **25%**, et non 75%. Changer de compartiment ne doit pas activer un bouton homonyme ; revenir sur le compartiment de travail réaffiche sa progression. Pour les réparations, seul le système effectivement traité est mis en évidence. Annulation, fin de l'intervention et perte du sous-marin suppriment cette indication d'activité.
+
 Si l'intervention devient dangereuse après un nouvel impact, vérifier « SUSPENDU » et le temps restant immobile. Pomper ou changer de priorité pour rétablir des conditions sûres. Le colmatage exige feu <25% et eau <90% ; la réparation de système feu <25% et eau <50%.
+
+Le bouton suspendu est orange, porte aussi **SUSPENDU** et conserve le même remplissage tant que le serveur ne fait pas avancer le travail. La reprise revient au vert sans remettre à zéro la progression.
 
 ## Réparer et reprendre la navigation
 

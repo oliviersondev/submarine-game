@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use shared::{CrewRole, DamageControlAction, EngineeringMeasurements, PlayerCommand, SystemId};
 
+use crate::button_activation::{self, ButtonActivated};
 use crate::network::{CommandQueue, GameState, LocalPlayer, NetworkReceiveSet};
 
 #[derive(Resource, Default)]
 struct Selection(u8);
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Select(u8),
     Pump,
@@ -42,7 +43,7 @@ pub(crate) fn spawn(parent: &mut ChildSpawnerCommands) {
             })
             .with_children(|line| {
                 for action in row {
-                    line.spawn((
+                    let mut button = line.spawn((
                         Button,
                         action,
                         Text::new("---"),
@@ -59,7 +60,9 @@ pub(crate) fn spawn(parent: &mut ChildSpawnerCommands) {
                             ..default()
                         },
                         BackgroundColor(Color::srgb(0.12, 0.16, 0.12)),
+                        BackgroundGradient::default(),
                     ));
+                    button_activation::enable(&mut button);
                 }
             });
     }
@@ -104,13 +107,15 @@ fn command(
 }
 
 fn buttons(
-    query: Query<(&Interaction, &Action), Changed<Interaction>>,
+    mut activated: MessageReader<ButtonActivated>,
+    query: Query<&Action>,
     player: Res<LocalPlayer>,
     state: Res<GameState>,
     mut selection: ResMut<Selection>,
     mut queue: ResMut<CommandQueue>,
 ) {
     if !state.game_started || player.role != Some(CrewRole::Engineer) {
+        activated.clear();
         return;
     }
     let Some(engineering) = state
@@ -118,12 +123,13 @@ fn buttons(
         .as_ref()
         .and_then(|s| s.engineering.as_ref())
     else {
+        activated.clear();
         return;
     };
-    for (interaction, action) in &query {
-        if *interaction != Interaction::Pressed {
+    for event in activated.read() {
+        let Ok(action) = query.get(event.0) else {
             continue;
-        }
+        };
         if let Action::Select(index) = action {
             selection.0 = *index;
         } else if let Some(command) = command(*action, selection.0, engineering) {
@@ -135,8 +141,17 @@ fn buttons(
 fn labels(
     state: Res<GameState>,
     selection: Res<Selection>,
-    mut query: Query<(&Action, &mut Text, &mut BackgroundColor, &mut Node)>,
+    mut query: Query<(
+        &Action,
+        &mut Text,
+        &mut BackgroundColor,
+        &mut Node,
+        &mut BackgroundGradient,
+    )>,
 ) {
+    if !state.is_changed() && !selection.is_changed() {
+        return;
+    }
     let Some(engineering) = state
         .submarine
         .as_ref()
@@ -145,20 +160,32 @@ fn labels(
         return;
     };
     let c = engineering.compartments[selection.0 as usize];
-    for (action, mut text, mut color, mut node) in &mut query {
-        node.display = if matches!(action, Action::Repair(i) if systems(selection.0).get(*i as usize).is_none())
+    let lost = state
+        .submarine
+        .as_ref()
+        .is_some_and(|s| s.common.damage.destroyed);
+    for (action, mut text, mut color, mut node, mut gradient) in &mut query {
+        let display = if matches!(action, Action::Repair(i) if systems(selection.0).get(*i as usize).is_none())
         {
             Display::None
         } else {
             Display::Flex
         };
+        if node.display != display {
+            node.display = display;
+        }
         let active = match action {
             Action::Select(i) => selection.0 == *i,
             Action::Pump => c.pumping,
             Action::Isolate => c.isolated,
             _ => false,
         };
-        text.0 = match action {
+        let intervention = if lost {
+            None
+        } else {
+            matching_intervention(*action, selection.0, engineering)
+        };
+        let mut label = match action {
             Action::Select(i) => format!(
                 "{}{}",
                 if active { "> " } else { "" },
@@ -180,12 +207,69 @@ fn labels(
                 .unwrap_or("---".into()),
             Action::Cancel => "ANNULER INTERVENTION".into(),
         };
-        color.0 = if active {
+        let mut background = if active || intervention.is_some() {
             Color::srgb(0.25, 0.32, 0.12)
         } else {
             Color::srgb(0.08, 0.15, 0.18)
         };
+        let progress_gradient = if let Some(task) = intervention {
+            let progress = intervention_percent(task);
+            let fill = if task.paused {
+                background = Color::srgb(0.28, 0.15, 0.04);
+                Color::srgb(0.62, 0.33, 0.07)
+            } else {
+                Color::srgb(0.38, 0.49, 0.17)
+            };
+            label.push_str(&format!(
+                " - {progress:.0}%{}",
+                if task.paused { " / SUSPENDU" } else { "" }
+            ));
+            progress_background(progress, fill, background)
+        } else {
+            BackgroundGradient::default()
+        };
+        text.set_if_neq(Text::new(label));
+        color.set_if_neq(BackgroundColor(background));
+        gradient.set_if_neq(progress_gradient);
     }
+}
+
+fn matching_intervention(
+    action: Action,
+    selected: u8,
+    engineering: &EngineeringMeasurements,
+) -> Option<shared::Intervention> {
+    let task = engineering.damage_control.intervention?;
+    if task.compartment != selected {
+        return None;
+    }
+    let target = match action {
+        Action::Seal => DamageControlAction::SealBreach,
+        Action::Extinguish => DamageControlAction::Extinguish,
+        Action::Repair(index) => {
+            DamageControlAction::RepairSystem(*systems(selected).get(index as usize)?)
+        }
+        _ => return None,
+    };
+    (task.action == target).then_some(task)
+}
+
+fn intervention_percent(task: shared::Intervention) -> f32 {
+    if !task.duration.is_finite() || task.duration <= 0.0 || !task.remaining.is_finite() {
+        return 0.0;
+    }
+    ((1.0 - task.remaining / task.duration) * 100.0).clamp(0.0, 100.0)
+}
+
+fn progress_background(progress: f32, fill: Color, base: Color) -> BackgroundGradient {
+    // Coincident stops give a solid fill, not a fading gradient. Keeping it on
+    // the button itself leaves text and pointer/drag handling unchanged.
+    BackgroundGradient::from(LinearGradient::to_right(vec![
+        ColorStop::new(fill, percent(0)),
+        ColorStop::new(fill, percent(progress)),
+        ColorStop::new(base, percent(progress)),
+        ColorStop::new(base, percent(100)),
+    ]))
 }
 
 pub(crate) fn system_label(id: SystemId) -> &'static str {
@@ -201,6 +285,202 @@ pub(crate) fn system_label(id: SystemId) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn engineering() -> EngineeringMeasurements {
+        EngineeringMeasurements {
+            propulsion: shared::PropulsionState::default(),
+            battery: 100.0,
+            oxygen: 100.0,
+            electrical_load: 0.0,
+            air_intake_available: true,
+            compartments: [shared::CompartmentState::default(); 3],
+            damage_history: vec![],
+            damage_control: shared::DamageControlStatus::default(),
+        }
+    }
+
+    fn task(action: DamageControlAction) -> shared::Intervention {
+        shared::Intervention {
+            compartment: 2,
+            action,
+            remaining: 13.5,
+            duration: 18.0,
+            paused: false,
+        }
+    }
+
+    #[test]
+    fn percentage_uses_completed_authoritative_time_and_stays_bounded() {
+        let mut task = task(DamageControlAction::Extinguish);
+        assert_eq!(intervention_percent(task), 25.0);
+        task.remaining = task.duration;
+        assert_eq!(intervention_percent(task), 0.0);
+        task.remaining = -1.0;
+        assert_eq!(intervention_percent(task), 100.0);
+        task.remaining = 40.0;
+        assert_eq!(intervention_percent(task), 0.0);
+        task.duration = 0.0;
+        assert_eq!(intervention_percent(task), 0.0);
+        task.duration = f32::NAN;
+        assert_eq!(intervention_percent(task), 0.0);
+        task.duration = 18.0;
+        task.remaining = f32::INFINITY;
+        assert_eq!(intervention_percent(task), 0.0);
+    }
+
+    #[test]
+    fn only_the_matching_action_compartment_and_system_are_active() {
+        let mut engineering = engineering();
+        engineering.damage_control.intervention = Some(task(DamageControlAction::Extinguish));
+        assert!(matching_intervention(Action::Extinguish, 2, &engineering).is_some());
+        assert!(matching_intervention(Action::Extinguish, 1, &engineering).is_none());
+        assert!(matching_intervention(Action::Seal, 2, &engineering).is_none());
+        assert!(matching_intervention(Action::Cancel, 2, &engineering).is_none());
+        engineering.damage_control.intervention =
+            Some(task(DamageControlAction::RepairSystem(SystemId::Life)));
+        assert!(matching_intervention(Action::Repair(1), 2, &engineering).is_some());
+        assert!(matching_intervention(Action::Repair(0), 2, &engineering).is_none());
+        assert!(matching_intervention(Action::Repair(1), 0, &engineering).is_none());
+        engineering.damage_control.intervention = Some(task(DamageControlAction::SealBreach));
+        assert!(matching_intervention(Action::Seal, 2, &engineering).is_some());
+    }
+
+    #[test]
+    fn buttons_display_progress_pause_and_clear_it_after_cancellation_or_loss() {
+        let mut engineering = engineering();
+        engineering.damage_control.intervention = Some(task(DamageControlAction::Extinguish));
+        let mut app = App::new();
+        app.insert_resource(Selection(2))
+            .insert_resource(GameState {
+                submarine: Some(shared::SubmarineSnapshot {
+                    common: shared::CommonMeasurements {
+                        x: 0.0,
+                        y: 0.0,
+                        heading: 0.0,
+                        speed: 0.0,
+                        depth: 100.0,
+                        dive_state: shared::DiveState::Submerged,
+                        acoustic_level: shared::AcousticLevel::Silent,
+                        alerts: vec![],
+                        damage: shared::DamageSummary::default(),
+                    },
+                    pilot: None,
+                    engineering: Some(engineering),
+                }),
+                ..default()
+            })
+            .add_systems(Startup, |mut commands: Commands| {
+                commands.spawn(Node::default()).with_children(spawn);
+            })
+            .add_systems(Update, labels);
+        app.update();
+        for paused in [false, true] {
+            app.world_mut()
+                .resource_mut::<GameState>()
+                .submarine
+                .as_mut()
+                .unwrap()
+                .engineering
+                .as_mut()
+                .unwrap()
+                .damage_control
+                .intervention
+                .as_mut()
+                .unwrap()
+                .paused = paused;
+            app.update();
+            let world = app.world_mut();
+            let mut buttons =
+                world.query::<(&Action, &Text, &BackgroundColor, &BackgroundGradient)>();
+            for (action, label, background, gradient) in buttons.iter(world) {
+                if *action == Action::Extinguish {
+                    assert!(label.0.contains("25%"));
+                    assert_eq!(label.0.contains("SUSPENDU"), paused);
+                    assert_eq!(gradient.0.len(), 1);
+                    assert_eq!(
+                        background.0,
+                        if paused {
+                            Color::srgb(0.28, 0.15, 0.04)
+                        } else {
+                            Color::srgb(0.25, 0.32, 0.12)
+                        }
+                    );
+                } else {
+                    assert!(gradient.0.is_empty());
+                }
+            }
+        }
+        for lost in [false, true] {
+            let mut state = app.world_mut().resource_mut::<GameState>();
+            let submarine = state.submarine.as_mut().unwrap();
+            submarine.common.damage.destroyed = lost;
+            submarine
+                .engineering
+                .as_mut()
+                .unwrap()
+                .damage_control
+                .intervention = if lost {
+                Some(task(DamageControlAction::Extinguish))
+            } else {
+                None
+            };
+            app.update();
+            let world = app.world_mut();
+            let mut buttons = world.query::<(&Action, &Text, &BackgroundGradient)>();
+            for (action, label, gradient) in buttons.iter(world) {
+                assert!(gradient.0.is_empty());
+                if *action == Action::Extinguish {
+                    assert_eq!(label.0, "ETEINDRE");
+                }
+            }
+        }
+    }
+    #[test]
+    fn compartment_clicks_are_processed_in_event_order_including_a_same_frame_burst() {
+        let mut player = LocalPlayer::default();
+        player.role = Some(CrewRole::Engineer);
+        let mut app = App::new();
+        app.add_plugins(button_activation::ButtonActivationPlugin)
+            .init_resource::<Selection>()
+            .init_resource::<CommandQueue>()
+            .insert_resource(player)
+            .insert_resource(GameState {
+                game_started: true,
+                submarine: Some(shared::SubmarineSnapshot {
+                    common: shared::CommonMeasurements {
+                        x: 0.0,
+                        y: 0.0,
+                        heading: 0.0,
+                        speed: 0.0,
+                        depth: 0.0,
+                        dive_state: shared::DiveState::Surface,
+                        acoustic_level: shared::AcousticLevel::Silent,
+                        alerts: vec![],
+                        damage: shared::DamageSummary::default(),
+                    },
+                    pilot: None,
+                    engineering: Some(engineering()),
+                }),
+                ..default()
+            })
+            .add_systems(Update, buttons);
+        // Spawn in the opposite order to the actual click order.
+        let machines = app.world_mut().spawn(Action::Select(2)).id();
+        let central = app.world_mut().spawn(Action::Select(1)).id();
+        for entity in [central, machines] {
+            app.world_mut()
+                .resource_mut::<Messages<ButtonActivated>>()
+                .write(ButtonActivated(entity));
+        }
+        app.update();
+        assert_eq!(app.world().resource::<Selection>().0, 2);
+        app.world_mut()
+            .resource_mut::<Messages<ButtonActivated>>()
+            .write(ButtonActivated(central));
+        app.update();
+        assert_eq!(app.world().resource::<Selection>().0, 1);
+    }
+
     #[test]
     fn compartment_selection_targets_the_right_systems() {
         assert_eq!(systems(0), vec![SystemId::Torpedo]);

@@ -8,6 +8,7 @@ use shared::{
     SonarObservation, SubmarineSnapshot, TrackEstimate, TrackId,
 };
 
+use crate::button_activation::{self, ButtonActivated};
 use crate::network::{controls_for_role, CommandQueue, GameState, LocalPlayer, RoomRequest};
 
 #[derive(Component)]
@@ -241,7 +242,7 @@ impl Plugin for RenderPlugin {
                     lobby_button_system,
                     pilot_button_system,
                     pilot_action_system,
-                    engineer_button_system,
+                    engineer_button_system.after(crate::network::NetworkReceiveSet),
                 ),
             )
             .add_systems(
@@ -1072,7 +1073,7 @@ fn spawn_engineer_station(commands: &mut Commands, player: &LocalPlayer) {
                         (EngineerControl::Ventilation, "VENTILATION"),
                         (EngineerControl::Charging, "RECHARGE"),
                     ] {
-                        row.spawn((
+                        let mut button = row.spawn((
                             control,
                             Button,
                             Text::new(label),
@@ -1092,6 +1093,7 @@ fn spawn_engineer_station(commands: &mut Commands, player: &LocalPlayer) {
                             },
                             BackgroundColor(Color::srgb(0.12, 0.13, 0.08)),
                         ));
+                        button_activation::enable(&mut button);
                     }
                 });
             crate::damage_control_ui::spawn(panel);
@@ -2443,7 +2445,10 @@ fn pilot_action_system(
 }
 
 fn engineer_button_system(
+    mut activated: MessageReader<ButtonActivated>,
+    controls: Query<&EngineerControl>,
     mut buttons: Query<(&Interaction, &EngineerControl, &mut BackgroundColor), With<Button>>,
+    player: Res<LocalPlayer>,
     state: Res<GameState>,
     mut commands: ResMut<CommandQueue>,
 ) {
@@ -2451,23 +2456,24 @@ fn engineer_button_system(
         .submarine
         .as_ref()
         .and_then(|submarine| submarine.engineering.as_ref());
+    for event in activated.read() {
+        if state.game_started && player.role == Some(CrewRole::Engineer) {
+            if let (Some(engineering), Ok(control)) = (engineering, controls.get(event.0)) {
+                let command = engineer_command(*control, engineering, &commands);
+                commands.push(command);
+            }
+        }
+    }
     for (interaction, control, mut background) in &mut buttons {
         let active = engineering
             .is_some_and(|engineering| engineer_control_active(*control, engineering, &commands));
-        *background = match interaction {
-            Interaction::Pressed => {
-                if state.game_started {
-                    if let Some(engineering) = engineering {
-                        let command = engineer_command(*control, engineering, &commands);
-                        commands.push(command);
-                    }
-                }
-                BackgroundColor(Color::srgb(0.35, 0.3, 0.08))
-            }
+        let color = match interaction {
+            Interaction::Pressed => BackgroundColor(Color::srgb(0.35, 0.3, 0.08)),
             Interaction::Hovered => BackgroundColor(Color::srgb(0.28, 0.25, 0.08)),
             Interaction::None if active => BackgroundColor(Color::srgb(0.32, 0.27, 0.06)),
             Interaction::None => BackgroundColor(Color::srgb(0.12, 0.13, 0.08)),
         };
+        background.set_if_neq(color);
     }
 }
 
@@ -2579,12 +2585,12 @@ fn engineering_text(engineering: &EngineeringMeasurements) -> String {
         .enumerate()
         .map(|(index, compartment)| {
             format!(
-                "{} : ETAT {:.0}% / EAU {:.1}% / FUITE {:.3}%/s\nFEU {:.0}% / ISOLE {} / POMPE {}",
+                "{} : ETAT {:.0}% / EAU {:.1}% / FUITE {:.3}%/s\nFEU {} / ISOLE {} / POMPE {}",
                 ["AVANT", "CENTRAL", "MACHINES"][index],
                 compartment.integrity,
                 compartment.flooding,
                 compartment.breach_rate,
-                compartment.fire,
+                fire_percentage(compartment.fire),
                 on_off(compartment.isolated),
                 if compartment.pumping && engineering.battery <= 0.0 {
                     "SANS COURANT"
@@ -2611,6 +2617,11 @@ fn engineering_text(engineering: &EngineeringMeasurements) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let history = if history.is_empty() {
+        history
+    } else {
+        format!("DERNIERS DEGATS (HISTORIQUE)\n{history}")
+    };
     let systems = engineering
         .damage_control
         .systems
@@ -2664,6 +2675,16 @@ fn damage_cause_label(cause: shared::DamageCause) -> &'static str {
     }
 }
 
+fn fire_percentage(fire: f32) -> String {
+    if fire <= 0.0 {
+        "0%".into()
+    } else if fire < 1.0 {
+        "<1%".into()
+    } else {
+        format!("{fire:.0}%")
+    }
+}
+
 fn damage_status(state: &GameState) -> String {
     let Some(submarine) = &state.submarine else {
         return "COQUE --- // EAU ---".into();
@@ -2674,17 +2695,14 @@ fn damage_status(state: &GameState) -> String {
     } else {
         "COQUE"
     };
-    let cause = damage
-        .last_cause
-        .map(damage_cause_label)
-        .unwrap_or("AUCUNE AVARIE");
     let hazards = if damage.fire > 0.0 || damage.unavailable_systems > 0 {
         format!(
-            "FEU {:.0}% / SYSTEMES INDISP. {}",
-            damage.fire, damage.unavailable_systems
+            "FEU {} / SYSTEMES INDISP. {}",
+            fire_percentage(damage.fire),
+            damage.unavailable_systems
         )
     } else {
-        cause.into()
+        "AUCUN INCENDIE ACTIF".into()
     };
     format!(
         "{status} {:.0}% // EAU {:.1}%\n{hazards}",
@@ -3124,12 +3142,13 @@ mod tests {
         let status = damage_status(&state);
         assert!(status.contains("72%"));
         assert!(status.contains("EAU 3.0%"));
-        assert!(status.contains("CHARGE DE PROFONDEUR"));
+        assert!(status.contains("AUCUN INCENDIE ACTIF"));
+        assert!(!status.contains("CHARGE DE PROFONDEUR"));
         state.submarine.as_mut().unwrap().common.damage = shared::DamageSummary::default();
         state
             .events
             .push_back((100, shared::GameEvent::ExplosionHeard));
-        assert!(damage_status(&state).contains("AUCUNE AVARIE"));
+        assert!(damage_status(&state).contains("AUCUN INCENDIE ACTIF"));
         assert!(damage_status(&state).contains("COQUE 100%"));
         state.server_tick = 201;
         assert!(!damage_status(&state).contains("EXPLOSION ENTENDUE"));
@@ -3138,8 +3157,101 @@ mod tests {
     }
 
     #[test]
+    fn extinguished_fire_is_not_displayed_as_an_active_hazard() {
+        let mut snapshot = pilot_snapshot(0.0, 0.0, 100.0);
+        snapshot.common.damage = shared::DamageSummary {
+            hull_integrity: 53.0,
+            last_cause: Some(shared::DamageCause::Fire),
+            ..default()
+        };
+        let mut state = GameState {
+            submarine: Some(snapshot),
+            ..default()
+        };
+        let status = damage_status(&state);
+        assert!(status.contains("COQUE 53%"));
+        assert_eq!(status.lines().nth(1), Some("AUCUN INCENDIE ACTIF"));
+        state.submarine.as_mut().unwrap().common.damage.fire = 0.1;
+        let status = damage_status(&state);
+        assert!(status.contains("FEU <1%"));
+        assert!(!status.contains("AUCUN INCENDIE ACTIF"));
+        state.submarine.as_mut().unwrap().common.damage.fire = 0.0;
+        state
+            .submarine
+            .as_mut()
+            .unwrap()
+            .common
+            .damage
+            .unavailable_systems = 1;
+        assert!(damage_status(&state).contains("FEU 0% / SYSTEMES INDISP. 1"));
+    }
+
+    #[test]
+    fn small_positive_fires_never_round_down_to_zero() {
+        assert_eq!(fire_percentage(0.0), "0%");
+        assert_eq!(fire_percentage(0.1), "<1%");
+        assert_eq!(fire_percentage(0.99), "<1%");
+        assert_eq!(fire_percentage(1.0), "1%");
+        assert_eq!(fire_percentage(19.0), "19%");
+    }
+
+    #[test]
+    fn engineer_toggles_are_sent_once_per_click_not_every_pressed_frame() {
+        let mut player = LocalPlayer::default();
+        player.role = Some(CrewRole::Engineer);
+        let mut snapshot = pilot_snapshot(0.0, 0.0, 0.0);
+        snapshot.engineering = Some(EngineeringMeasurements {
+            propulsion: shared::PropulsionState::default(),
+            battery: 100.0,
+            oxygen: 100.0,
+            electrical_load: 0.0,
+            air_intake_available: true,
+            compartments: [shared::CompartmentState::default(); 3],
+            damage_history: vec![],
+            damage_control: shared::DamageControlStatus::default(),
+        });
+        let mut app = App::new();
+        app.add_plugins(crate::button_activation::ButtonActivationPlugin)
+            .init_resource::<CommandQueue>()
+            .insert_resource(player)
+            .insert_resource(GameState {
+                game_started: true,
+                submarine: Some(snapshot),
+                ..default()
+            })
+            .add_systems(Update, engineer_button_system);
+        let button = app
+            .world_mut()
+            .spawn((
+                Button,
+                EngineerControl::Diesels,
+                Interaction::Pressed,
+                BackgroundColor(Color::BLACK),
+            ))
+            .id();
+        app.update();
+        assert!(app.world().resource::<CommandQueue>().pending_diesels(true));
+        app.world_mut()
+            .resource_mut::<Messages<ButtonActivated>>()
+            .write(ButtonActivated(button));
+        app.update();
+        for _ in 0..20 {
+            assert!(!app.world().resource::<CommandQueue>().pending_diesels(true));
+            app.update();
+        }
+        app.world_mut()
+            .resource_mut::<Messages<ButtonActivated>>()
+            .write(ButtonActivated(button));
+        app.update();
+        assert!(app
+            .world()
+            .resource::<CommandQueue>()
+            .pending_diesels(false));
+    }
+
+    #[test]
     fn engineering_reports_compartments_and_persistent_damage_history() {
-        let engineering = EngineeringMeasurements {
+        let mut engineering = EngineeringMeasurements {
             propulsion: shared::PropulsionState::default(),
             battery: 80.0,
             oxygen: 90.0,
@@ -3153,7 +3265,7 @@ mod tests {
             }; 3],
             damage_history: vec![shared::DamageRecord {
                 tick: 42,
-                cause: shared::DamageCause::Pressure,
+                cause: shared::DamageCause::Fire,
                 hull_damage: 2.0,
                 compartment: None,
                 destroyed: false,
@@ -3168,11 +3280,15 @@ mod tests {
             "EAU 12.0%",
             "FUITE 0.060%/s",
             "t42",
-            "PRESSION",
+            "DERNIERS DEGATS (HISTORIQUE)",
+            "t42 : INCENDIE",
             "EQUIPE",
         ] {
             assert!(text.contains(label), "missing {label}");
         }
+        assert_eq!(text.matches("FEU 0%").count(), 3);
+        engineering.compartments[1].fire = 0.1;
+        assert!(engineering_text(&engineering).contains("FEU <1%"));
     }
 
     #[test]
