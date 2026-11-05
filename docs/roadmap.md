@@ -1,7 +1,7 @@
 # Roadmap de conception et de développement
 
 **Version :** 0.1  
-**Date :** 4 novembre 2026\
+**Date :** 5 novembre 2026\
 **Statut :** active
 
 Cette roadmap transforme le prototype réseau actuel en une mission de sous-marin jouable. Elle privilégie les vertical slices : chaque jalon doit relier règles, protocole, serveur et interface plutôt que terminer un système isolé invisible pour le joueur.
@@ -44,7 +44,7 @@ L'escorte possède une recherche acoustique privée, des pings actifs et un reto
 | M4 | une torpille peut atteindre une cible simulée | critique |
 | M5 | une escorte cherche, attaque et provoque des avaries | critique |
 | P1 | le Capitaine observe au périscope et partage des contacts visuels autonomes | implémenté, recette tactile réelle à confirmer |
-| P2 | le périscope exposé peut être détecté par l'ennemi | suivi explicite après P1, planification à préciser |
+| P2 | le périscope exposé peut être détecté par l'ennemi | implémenté, recette manuelle et équilibrage à confirmer |
 | M6 | une mission complète possède victoire, défaite et bilan | critique |
 | M7 | les cinq postes sont utilisables sur téléphone | élevée |
 | M8 | reconnexion, robustesse et déploiement de démonstration | élevée |
@@ -335,13 +335,16 @@ Les valeurs initiales sont des paramètres d'équilibrage centralisés dans `Per
 
 ### P2 — Suivi obligatoire : détection du périscope
 
-**Statut :** à réaliser après P1 ; position exacte par rapport aux tranches M6 à décider. Ne pas supprimer ce suivi lors de la clôture de P1.
+**Statut :** implémenté le 5 novembre 2026, avant M6 ; recette manuelle et équilibrage à confirmer.
 
-- Définir les conditions d'observation du périscope exposé par les bâtiments ennemis et les paramètres de visibilité.
-- Alimenter la perception privée de l'escorte par une observation imparfaite, jamais par un accès continu à la position réelle du joueur.
-- Préciser le risque présenté au joueur sans confirmer magiquement une détection ennemie.
-- Valider qu'un périscope abaissé ou hors conditions de visibilité ne produit pas d'observation visuelle, qu'un périscope exposé dans les conditions définies peut en produire une, et que la poursuite repose ensuite sur la piste privée vieillissante.
-- Mettre à jour le GDD et ajouter des tests déterministes de détection, de perte et d'absence d'omniscience. La détection aérienne n'est pas incluse par défaut.
+- Vigies à 360° sur tous les bâtiments à flot, cargos moins efficaces : portée de 2 km contre 3 km, acquisition de 24 s contre 12 s en limite de portée à l'arrêt, estimation moins précise.
+- Acquisition progressive indépendante par bâtiment, accélérée par proximité et vitesse ; décroissance hors visibilité, sans remise à zéro immédiate lors d'un bref abaissement.
+- Transmission immédiate des observations imparfaites des cargos à l'escorte ; exploitation de sa piste privée, de son vieillissement et des comportements existants, sans suivi de la position réelle.
+- Aucun avertissement d'exposition ni indicateur de détection ajouté au client, conformément au cadrage validé.
+- Configuration centralisée dans `MissionConfig::escort.visual`, protocole v11 incompatible v10, sans nouvelle commande ou projection de perception ennemie.
+- Tests déterministes de progression, proximité/vitesse, différences cargo/escorte, limites de portée, décroissance, bâtiments coulés, abaissement automatique, rejeu et absence d'omniscience après perte de vue. Voir la [recette P2](recette-p2.md).
+
+**Hors périmètre :** détection de la coque en surface périscope rentré (issue séparée), avions, météo, radio simulée, nouvelles réactions des cargos et nouvelles armes.
 
 ## 10. M6 - Mission de référence complète
 

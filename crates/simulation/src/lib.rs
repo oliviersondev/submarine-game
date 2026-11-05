@@ -4,6 +4,7 @@ mod detection;
 mod enemy_ai;
 mod periscope;
 mod tracks;
+mod visual_detection;
 mod weapons;
 mod world;
 
@@ -114,6 +115,15 @@ impl Simulation {
         self.update_resources(dt);
         self.update_acoustic_signature();
         self.sanitize_state();
+        // Enforce automatic lowering before enemy lookouts sample this tick.
+        self.update_periscope(0.0);
+        self.world.observe_periscope(
+            dt,
+            &self.state,
+            self.tick.wrapping_add(1),
+            self.config.escort.visual,
+            self.periscope.raised(),
+        );
         events.extend(self.world.update(
             dt,
             &self.state,
@@ -814,6 +824,34 @@ fn shortest_angle(current: f32, target: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn periscope_visual_detection_respects_automatic_lowering_before_sampling() {
+        use shared::{PeriscopeBlock, PlayerCommand};
+        for outside in [
+            None,
+            Some(PeriscopeBlock::Depth),
+            Some(PeriscopeBlock::Speed),
+        ] {
+            let mut sim = super::Simulation::new();
+            sim.config.escort.passive_range = 0.0;
+            sim.config.escort.active_range = 0.0;
+            sim.config.escort.visual.escort.acquisition_time = 0.001;
+            sim.state.x = sim.world.vessels[2].x + 500.0;
+            sim.state.y = sim.world.vessels[2].y;
+            sim.state.depth = 12.0;
+            sim.apply_command(PlayerCommand::SetPeriscopeRaised(true))
+                .unwrap();
+            match outside {
+                Some(PeriscopeBlock::Depth) => sim.state.depth = 20.0,
+                Some(PeriscopeBlock::Speed) => sim.state.speed = 8.0,
+                _ => {}
+            }
+            sim.tick(0.05);
+            assert_eq!(sim.world.enemy_track().is_some(), outside.is_none());
+            assert_eq!(sim.periscope_measurements().raised, outside.is_none());
+        }
+    }
+
     fn advance_seconds(sim: &mut super::Simulation, seconds: u32) {
         for _ in 0..seconds * 20 {
             sim.tick(0.05);

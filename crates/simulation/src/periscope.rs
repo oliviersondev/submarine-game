@@ -21,6 +21,10 @@ pub(crate) struct Periscope {
 }
 
 impl Periscope {
+    pub(crate) fn raised(&self) -> bool {
+        self.raised
+    }
+
     pub(crate) fn update(
         &mut self,
         world: &World,

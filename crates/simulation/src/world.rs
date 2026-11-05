@@ -21,6 +21,7 @@ pub(crate) struct Vessel {
     pub(crate) signature: f32,
     integrity: f32,
     kind: VesselKind,
+    lookout: crate::visual_detection::Lookout,
 }
 
 impl Vessel {
@@ -52,6 +53,43 @@ pub(crate) struct World {
 }
 
 impl World {
+    /// Cargo reports are immediate, private observations, not public events.
+    pub(crate) fn observe_periscope(
+        &mut self,
+        dt: f32,
+        submarine: &SubmarineState,
+        tick: u64,
+        config: shared::PeriscopeDetectionConfig,
+        raised: bool,
+    ) {
+        let escort_alive = self
+            .vessels
+            .iter()
+            .any(|v| v.kind == VesselKind::Escort && v.afloat());
+        for (index, vessel) in self.vessels.iter_mut().enumerate() {
+            let profile = match vessel.kind {
+                VesselKind::Cargo => config.cargo,
+                VesselKind::Escort => config.escort,
+            };
+            let visible = raised && vessel.afloat();
+            if let Some(observation) = vessel.lookout.update(
+                dt,
+                (vessel.x, vessel.y),
+                submarine,
+                visible,
+                profile,
+                config,
+                self.seed,
+                tick,
+                index as u64,
+            ) {
+                if escort_alive {
+                    self.escort_ai.observe(observation);
+                }
+            }
+        }
+    }
+
     pub(crate) fn new(seed: u64) -> Self {
         let offset = signed_unit(seed, 1) * 400.0;
         let heading = 165.0 + signed_unit(seed, 2) * 8.0;
@@ -256,6 +294,7 @@ fn vessel(kind: VesselKind, x: f32, y: f32, heading: f32, speed: f32) -> Vessel 
         },
         integrity: 100.0,
         kind,
+        lookout: crate::visual_detection::Lookout::default(),
     }
 }
 
@@ -282,6 +321,81 @@ mod tests {
             acoustic_signature: 0.0,
             ..SubmarineState::default()
         }
+    }
+
+    #[test]
+    fn cargo_reports_reach_escort_without_escort_visibility_or_public_event() {
+        let mut world = World::new(42);
+        world.vessels[2].x = 30_000.0;
+        let sub = silent_sub(world.vessels[0].x + 500.0, world.vessels[0].y);
+        let config = EscortConfig {
+            passive_range: 0.0,
+            active_range: 0.0,
+            ..EscortConfig::default()
+        };
+        for tick in 1..=300 {
+            world.observe_periscope(0.05, &sub, tick, config.visual, true);
+            assert!(world.update(0.05, &sub, tick, config).is_empty());
+        }
+        let (x, y, uncertainty, _) = world.enemy_track().unwrap();
+        assert_ne!((x, y), (sub.x, sub.y));
+        assert!(uncertainty > 0.0);
+        assert_eq!(world.escort_ai.phase, Phase::Search);
+    }
+
+    #[test]
+    fn sunk_lookouts_cannot_report_and_lowered_scope_is_not_seen_even_at_surface() {
+        let config = EscortConfig::default();
+        for raised in [false, true] {
+            let mut world = World::new(42);
+            let mut sub = silent_sub(world.vessels[0].x, world.vessels[0].y);
+            sub.depth = 0.0;
+            if raised {
+                // Keep the receiving escort alive, but outside visual range.
+                world.vessels[0].integrity = 0.0;
+                world.vessels[1].integrity = 0.0;
+                world.vessels[2].x = 30_000.0;
+            }
+            for tick in 1..=1_000 {
+                world.observe_periscope(0.05, &sub, tick, config.visual, raised);
+            }
+            assert!(world.enemy_track().is_none());
+        }
+    }
+
+    #[test]
+    fn lost_visual_contact_ages_without_following_hidden_player_and_replay_is_identical() {
+        let config = EscortConfig {
+            passive_range: 0.0,
+            active_range: 0.0,
+            ..EscortConfig::default()
+        };
+        let mut a = World::new(42);
+        let sub = silent_sub(a.vessels[2].x + 500.0, a.vessels[2].y);
+        let mut replay = a.clone();
+        for tick in 1..=120 {
+            for world in [&mut a, &mut replay] {
+                world.observe_periscope(0.05, &sub, tick, config.visual, true);
+                world.update(0.05, &sub, tick, config);
+            }
+            assert_eq!(a, replay);
+        }
+        let initial = a.enemy_track().unwrap();
+        let mut b = a.clone();
+        let other = silent_sub(-30_000.0, -20_000.0);
+        for tick in 121..=1_500 {
+            a.observe_periscope(0.05, &sub, tick, config.visual, false);
+            b.observe_periscope(0.05, &other, tick, config.visual, false);
+            a.update(0.05, &sub, tick, config);
+            b.update(0.05, &other, tick, config);
+            assert_eq!(a, b);
+            if tick == 140 {
+                let aged = a.enemy_track().unwrap();
+                assert_eq!((aged.0, aged.1, aged.3), (initial.0, initial.1, initial.3));
+                assert!(aged.2 > initial.2);
+            }
+        }
+        assert!(a.enemy_track().is_none());
     }
 
     #[test]

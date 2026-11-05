@@ -111,12 +111,12 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
 | Navigation | consignes et valeurs réelles, inertie, plongée, ballasts, remontée d'urgence et dérive liée à l'inondation | assiette et stabilité |
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
-| Périscope | vue 2D, conditions d'utilisation autoritaires et contacts visuels autonomes partageables | détection ennemie du périscope (P2), météo et enrichissement visuel |
+| Périscope | vue 2D, conditions d'utilisation autoritaires, contacts visuels autonomes partageables et vigies ennemies (P2) | détection de la coque en surface, météo et enrichissement visuel |
 | Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
 | Ingénierie | endurance, compartiments, dégâts, pompage, isolation, incendies, pannes, interventions temporisées et bot d'avaries | distribution détaillée, équilibrage et ergonomie enrichie |
 | IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche, attaque non guidée et retour au convoi | bots de poste complets et tactiques enrichies |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
-| Protocole | version 10, identifiants opaques, projections par rôle, armement, avaries, périscope et contacts visuels, accusés de commandes | reprise et négociation de compatibilité |
+| Protocole | version 11, identifiants opaques, projections par rôle, armement, avaries, périscope, contacts visuels et configuration des vigies, accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -172,7 +172,7 @@ Le protocole v5 a ajouté `WeaponsMeasurements::solution_errors`, aligné sur le
 
 Le protocole v6 ajoute `TubeMeasurements::loaded`, `WeaponsConfig::max_surface_impact_depth` et des refus explicites pour profondeur incompatible et autorisation portant sur des réglages périmés. Les vitesses égales sont désormais traitées par le calcul linéaire d'interception, sans erreur spéciale. Les consignes bot en attente restent privées à la simulation et passent par `ConfigureShot` après chargement. Les événements de lancement avec relèvement, d'explosion et de fin de course sont réservés à Capitaine/Armement/Sonar. Le client conserve les 64 derniers événements avec leur tick ; le poste Armement affiche les six derniers événements d'armement dans l'ordre chronologique, sans écrasement des événements reçus dans un même lot réseau.
 
-M5.1 ajoute `enemy_ai.rs`, propriétaire privé des états escorte/suspicion/recherche/retour, des pistes vieillissantes et des points de recherche. Ce module ne reçoit jamais `SubmarineState` : seules les fonctions de perception dans `detection.rs` consultent l'état réel pour produire des observations bruitées. `world.rs` orchestre les capteurs, les décisions et les déplacements limités, connaît les positions amies du convoi et transforme les impacts audibles en alertes de zone, sans fournir l'origine du tir. Une escorte coulée est exclue des capteurs et des décisions.
+M5.1 ajoute `enemy_ai.rs`, propriétaire privé des états escorte/suspicion/recherche/retour, des pistes vieillissantes et des points de recherche. Ce module ne reçoit jamais `SubmarineState` : seules les fonctions de perception dans `detection.rs` et, depuis P2, `visual_detection.rs` consultent l'état réel pour produire des observations bruitées. `world.rs` orchestre les capteurs, les décisions et les déplacements limités, connaît les positions amies du convoi et transforme les impacts audibles en alertes de zone, sans fournir l'origine du tir. Une escorte coulée est exclue des capteurs et des décisions.
 
 L'ordre du tick est stable : mouvement/ressources/bruit du joueur, vieillissement de la mémoire ennemie, écoute et éventuel ping ennemi, décision et déplacement des navires, suivi Sonar joueur, puis torpilles/impacts et alertes. Une alerte d'impact est donc exploitée au tick suivant. Les erreurs de mesure dérivent de la graine et du tick, sans horloge murale.
 
@@ -262,7 +262,9 @@ La mémoire est bornée à 64 contacts. Le relèvement et l'heure sont actualis�
 
 Le lobby refuse un démarrage solo sans Capitaine humain (`SoloCaptainRequired`), sans modifier la salle ; les quatre autres postes sont des bots. Le client guide le choix de rôle et propose des consignes réglables au bot Pilote, en conservant le refus serveur si celui-ci est humain. Les compositions multijoueurs avec bot Capitaine restent possibles.
 
-La détection ennemie du périscope n'appartient pas à P1. Le suivi P2 devra produire des observations privées imparfaites pour l'escorte, puis réutiliser sa logique de piste vieillissante sans introduire d'omniscience. Les mécanismes de détection acoustique restent inchangés. Voir la [roadmap](roadmap.md) et la [recette P1](recette-p1.md).
+P2 ajoute `visual_detection.rs` : chaque `Vessel` possède une vigie privée avec acquisition progressive normalisée. `Simulation` applique les limites et l'abaissement automatique avant `World::observe_periscope`, puis le monde fait avancer la piste et les décisions de l'escorte. Les cargos transmettent immédiatement leurs observations bruitées, même si l'escorte est hors portée visuelle ; un bâtiment coulé ne produit aucune observation. Hors visibilité, seule l'acquisition inachevée décroît, sans accès aux déplacements cachés. Une acquisition complète produit une `enemy_ai::Observation` ; l'IA ne reçoit ni l'état réel ni l'état d'exposition du périscope. Les mécanismes acoustiques restent inchangés.
+
+Le protocole v11, incompatible v10, ajoute `EscortConfig::visual` (`PeriscopeDetectionConfig`, profils `LookoutConfig`). Les mesures, commandes, permissions et projections client restent inchangées : ni progression d'acquisition, ni piste privée, ni confirmation de détection ne sortent du serveur. Les paramètres non finis ou invalides désactivent la vigie concernée ; les états privés d'acquisition ne sont pas sérialisés. Voir la [roadmap](roadmap.md) et les recettes [P1](recette-p1.md) / [P2](recette-p2.md).
 
 ## 6. Vue d'exécution
 
@@ -448,7 +450,7 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | TD-03 | protocole non versionné | résolu en M1, évolué en M2 | version 2 et fixtures exactes `postcard` |
 | TD-04 | riposte, dégâts et contrôle des avaries livrés en M5.1–M5.3 | M5 clôturé par décision du porteur du projet | équilibrage continu ; P1 implémenté avant M6 |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
-| TD-06 | détection ennemie du périscope volontairement absente du périmètre P1 | futur avantage tactique sans risque visuel associé | réaliser le suivi P2 de la roadmap ; ne pas considérer cette absence comme définitive |
+| TD-06 | P2 détecte le périscope, mais pas encore la coque en surface périscope rentré | navigation en surface sans risque visuel propre à la coque | traiter l'issue séparée de détection visuelle de la coque |
 
 ## 12. Glossaire
 
