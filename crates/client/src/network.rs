@@ -168,6 +168,9 @@ pub struct GameState {
     pub tactical: Option<TacticalMeasurements>,
     pub weapons: Option<shared::WeaponsMeasurements>,
     pub weapons_config: Option<shared::WeaponsConfig>,
+    pub periscope: Option<shared::PeriscopeMeasurements>,
+    pub periscope_config: Option<shared::PeriscopeConfig>,
+    pub visual_contacts: Vec<shared::VisualContact>,
     pub last_accepted_command: Option<CommandId>,
     pub snapshot_id: u64,
     pub server_tick: u64,
@@ -430,6 +433,7 @@ fn handle_server_message(
         ServerPayload::MissionStarted { config } => {
             state.game_started = true;
             state.weapons_config = Some(config.weapons);
+            state.periscope_config = Some(config.periscope);
             state.events.clear();
             commands.clear_intents();
         }
@@ -444,6 +448,8 @@ fn handle_server_message(
                 state.sonar = mission.sonar;
                 state.tactical = mission.tactical;
                 state.weapons = mission.weapons;
+                state.periscope = mission.periscope;
+                state.visual_contacts = mission.visual_contacts;
                 state.snapshot_id = snapshot_id;
                 state.server_tick = tick;
             }

@@ -4,7 +4,7 @@ use bevy::ui::RelativeCursorPosition;
 use bevy::window::PrimaryWindow;
 use shared::{
     AlertKind, BallastState, ContactClassification, CrewRole, EngineeringMeasurements,
-    LobbyCommand, ObservationMode, PilotOrder, PlayerCommand, ProtocolError, RoleOccupant, RoomId,
+    LobbyCommand, ObservationMode, PlayerCommand, ProtocolError, RoleOccupant, RoomId,
     SonarObservation, SubmarineSnapshot, TrackEstimate, TrackId,
 };
 
@@ -63,7 +63,6 @@ enum CodeKey {
 enum LobbyAction {
     Ready,
     Start,
-    OrderPilot,
 }
 
 #[derive(Component)]
@@ -416,7 +415,7 @@ fn spawn_role_selector(commands: &mut Commands, player: &LocalPlayer) {
                         TextColor(Color::srgb(0.82, 0.95, 1.0)),
                     ));
                     roles.spawn((
-                        Text::new("Selectionnez un poste."),
+                        Text::new("Solo : choisissez CAPITAINE. Autres postes : multijoueur."),
                         TextFont {
                             font_size: FontSize::Px(14.0),
                             ..default()
@@ -593,11 +592,6 @@ fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
     for (action, label, top) in [
         (LobbyAction::Ready, "PRET", 16.0),
         (LobbyAction::Start, "DEMARRER", 68.0),
-        (
-            LobbyAction::OrderPilot,
-            "ORDRE BOT PILOTE 090 / 8 kn / 50 m",
-            16.0,
-        ),
     ] {
         commands.spawn((
             LobbyPanel,
@@ -622,7 +616,7 @@ fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
             },
             BackgroundColor(Color::srgb(0.04, 0.16, 0.21)),
             GlobalZIndex(40),
-            lobby_action_visibility(player, action),
+            lobby_action_visibility(player),
         ));
     }
 }
@@ -639,7 +633,7 @@ fn update_lobby_action_layout(
             node.top = Val::Auto;
             node.bottom = px(match action {
                 LobbyAction::Ready => 68,
-                LobbyAction::Start | LobbyAction::OrderPilot => 16,
+                LobbyAction::Start => 16,
             });
             node.left = px(276);
             node.right = px(16);
@@ -649,7 +643,7 @@ fn update_lobby_action_layout(
             node.top = Val::Auto;
             node.bottom = px(match action {
                 LobbyAction::Ready => 68,
-                LobbyAction::Start | LobbyAction::OrderPilot => 16,
+                LobbyAction::Start => 16,
             });
             node.left = px(16);
             node.right = px(16);
@@ -657,7 +651,7 @@ fn update_lobby_action_layout(
             node.max_width = px(420);
         } else {
             node.top = px(match action {
-                LobbyAction::Ready | LobbyAction::OrderPilot => 16,
+                LobbyAction::Ready => 16,
                 LobbyAction::Start => 68,
             });
             node.bottom = Val::Auto;
@@ -1570,10 +1564,8 @@ fn selector_visibility(player: &LocalPlayer) -> Visibility {
     }
 }
 
-fn lobby_action_visibility(player: &LocalPlayer, action: LobbyAction) -> Visibility {
-    if player.id.is_some()
-        && (!matches!(action, LobbyAction::OrderPilot) || player.role == Some(CrewRole::Captain))
-    {
+fn lobby_action_visibility(player: &LocalPlayer) -> Visibility {
+    if player.id.is_some() {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -1691,10 +1683,7 @@ fn update_panel_visibility(
     for (mut visibility, hud, selector, pilot, engineer, sonar, tactical, lobby, lobby_action) in
         &mut panels
     {
-        let lobby_action_visible = lobby_action.is_some_and(|action| match action {
-            LobbyAction::Ready | LobbyAction::Start => !state.game_started,
-            LobbyAction::OrderPilot => state.game_started && player.role == Some(CrewRole::Captain),
-        });
+        let lobby_action_visible = lobby_action.is_some() && !state.game_started;
         let dedicated_fullscreen_station = state.game_started
             && matches!(
                 player.role,
@@ -1882,6 +1871,9 @@ fn update_sonar_station(
         }
     );
     observations.0 = observation_list(&sonar.observations);
+    observations
+        .0
+        .push_str(&crate::periscope_ui::shared_contacts_text(&state));
     let journal = ping_journal(&state);
     pings.0 = if journal.is_empty() {
         "PINGS ENTENDUS // AUCUN".to_owned()
@@ -2368,7 +2360,6 @@ fn lobby_button_system(
         (&Interaction, &LobbyAction, &mut BackgroundColor),
         (Changed<Interaction>, With<Button>),
     >,
-    state: Res<GameState>,
     mut commands: ResMut<CommandQueue>,
 ) {
     for (interaction, action, mut background) in &mut buttons {
@@ -2377,14 +2368,6 @@ fn lobby_button_system(
                 match action {
                     LobbyAction::Ready => commands.lobby(LobbyCommand::SetReady { ready: true }),
                     LobbyAction::Start => commands.lobby(LobbyCommand::StartMission),
-                    LobbyAction::OrderPilot if state.game_started => {
-                        commands.order_pilot(PilotOrder {
-                            heading: 90.0,
-                            speed: 8.0,
-                            depth: 50.0,
-                        });
-                    }
-                    LobbyAction::OrderPilot => {}
                 }
                 BackgroundColor(Color::srgb(0.08, 0.42, 0.52))
             }
@@ -2911,6 +2894,12 @@ pub(crate) fn error_label(error: &ProtocolError) -> String {
         ProtocolError::UnsafeCompartment => "COMPARTIMENT DANGEREUX : ETEINDRE OU POMPER D'ABORD".into(),
         ProtocolError::SystemUnavailable(id) => format!("{} INDISPONIBLE : VERIFIER PANNE, ISOLATION, FEU ET EAU", crate::damage_control_ui::system_label(*id)),
         ProtocolError::InsufficientBattery => "BATTERIE VIDE : POMPAGE IMPOSSIBLE".into(),
+        ProtocolError::SoloCaptainRequired => "SOLO : CHOISIR CAPITAINE AVANT DE CREER LA SALLE, OU ATTENDRE UN AUTRE JOUEUR".into(),
+        ProtocolError::PeriscopeUnavailable(reason) => format!("PERISCOPE : {}", crate::periscope_ui::block_label(*reason)),
+        ProtocolError::InvalidPeriscopeBearing => "RELÈVEMENT PERISCOPE INVALIDE".into(),
+        ProtocolError::VisualObservationLost => "SILHOUETTE PERDUE : OBSERVER A NOUVEAU".into(),
+        ProtocolError::VisualContactNotFound => "CONTACT VISUEL EXPIRE".into(),
+        ProtocolError::VisualContactLimitReached => "LIMITE DE CONTACTS VISUELS ATTEINTE".into(),
         ProtocolError::TrackNotFound(track_id) => {
             format!("PISTE T{} INTROUVABLE", track_id.0)
         }

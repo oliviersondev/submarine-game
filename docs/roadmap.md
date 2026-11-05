@@ -1,7 +1,7 @@
 # Roadmap de conception et de développement
 
 **Version :** 0.1  
-**Date :** 1 septembre 2026  
+**Date :** 4 novembre 2026\
 **Statut :** active
 
 Cette roadmap transforme le prototype réseau actuel en une mission de sous-marin jouable. Elle privilégie les vertical slices : chaque jalon doit relier règles, protocole, serveur et interface plutôt que terminer un système isolé invisible pour le joueur.
@@ -43,6 +43,8 @@ L'escorte possède une recherche acoustique privée, des pings actifs et un reto
 | M3 | le sonar découvre et suit un convoi | critique |
 | M4 | une torpille peut atteindre une cible simulée | critique |
 | M5 | une escorte cherche, attaque et provoque des avaries | critique |
+| P1 | le Capitaine observe au périscope et partage des contacts visuels autonomes | implémenté, recette tactile réelle à confirmer |
+| P2 | le périscope exposé peut être détecté par l'ennemi | suivi explicite après P1, planification à préciser |
 | M6 | une mission complète possède victoire, défaite et bilan | critique |
 | M7 | les cinq postes sont utilisables sur téléphone | élevée |
 | M8 | reconnexion, robustesse et déploiement de démonstration | élevée |
@@ -105,7 +107,7 @@ L'escorte possède une recherche acoustique privée, des pings actifs et un reto
 
 ### État implémenté au 27 août 2026
 
-Les livrables M1 ci-dessus sont présents sous forme minimale : salles éphémères en mémoire, rôles uniques, prêts, démarrage explicite dès un humain avec quatre bots en solo, protocole v1 avec fixtures, mission déterministe numérotée et ordre du capitaine au bot Pilote. Les tests couvrent notamment deux salles isolées, les permissions du bot et le rejeu déterministe. La persistance, la reconnexion, les bots des autres postes et des contrôles capitaine configurables restent hors de M1 ; l'ordre tactile livré utilise une consigne fixe de démonstration.
+Les livrables M1 ci-dessus sont présents sous forme minimale : salles éphémères en mémoire, rôles uniques, prêts, démarrage explicite dès un humain avec quatre bots en solo, protocole v1 avec fixtures, mission déterministe numérotée et ordre du capitaine au bot Pilote. Les tests couvrent notamment deux salles isolées, les permissions du bot et le rejeu déterministe. La persistance, la reconnexion, les bots des autres postes et des contrôles capitaine configurables restent hors de M1. Depuis P1, les ordres au bot Pilote passent par les consignes réglables du panneau périscope et **ORDONNER** ; le raccourci de démonstration M1 a été retiré.
 
 ## 6. M2 - Navigation, plongée et endurance
 
@@ -287,11 +289,65 @@ Après avoir attaqué, l'équipage peut rompre le contact et survivre à une rec
 - **M5.2 — Riposte et dégâts : implémenté le 20 octobre 2026, recette manuelle à confirmer.** État d'attaque depuis une piste privée récente et assez précise, charges non guidées à profondeurs prédéfinies, stock fini et cadence limitée. Dégâts radiaux de coque et de compartiment, voies d'eau persistantes, dérive verticale, destruction par coque, pression ou inondation complète. Protocole v8 incompatible v7 : synthèse à tous les postes, détails et historique borné à l'Ingénierie. Depuis le 21 octobre, les explosions audibles déclenchent aux cinq postes un bandeau non bloquant de 3 secondes avec regroupement, sans confirmation d'impact. Les snapshots conservent l'état malgré la perte d'événements. Les tests couvrent acquisition acoustique jusqu'aux dégâts, absence d'omniscience, esquive après largage, cadences/stock, filtrage, destruction et rejeu. Voir [la recette M5.2](recette-m5.2.md). L'équilibrage et l'essai tactile réel restent à confirmer.
 - **M5.3 — Contrôle des avaries : implémenté le 26 octobre 2026, recette manuelle à confirmer.** Pompage bruyant et électrique, isolation avec équipements indisponibles, équipe unique pour colmatage/extinction/réparation temporisés, annulation et suspension du travail dangereux. Incendies et pannes issus des impacts, propagation adjacente limitée, effets sur commandes, navigation et sonar, remontée d'urgence indépendante. Bot Ingénierie utilisant les mêmes commandes et délais, sans consigne Pilote ni régénération de coque. Protocole v9 incompatible v8 : compartiments enrichis, équipe et état des systèmes projetés à l'Ingénierie ; synthèse feu/pannes et alertes à tous. Les tests couvrent cycle de récupération, énergie/bruit, isolation, pannes, propagation, rôle serveur et rejeu bot. Voir [la recette M5.3](recette-m5.3.md). Équilibrage sous attaques répétées et ergonomie tactile réelle restent à valider.
 
-La détection visuelle/aérienne reste exclue. La boucle technique M5 est implémentée mais sa recette d'ensemble reste à confirmer. Les interventions M5.3 maîtrisent les avaries sans restaurer la coque ; un sous-marin détruit reste immobilisé et refuse les commandes, sans écran de fin de mission (M6).
+**Clôture M5 :** jalon déclaré clôturé par le porteur du projet lors du cadrage du prochain incrément, confirmé le 4 novembre 2026. Les mentions de recette à confirmer ci-dessus décrivent l'état historique à la livraison ; cette clôture ne constitue pas un nouveau compte rendu d'exécution des tests. L'équilibrage continu reste possible sans rouvrir le périmètre M5.
+
+La détection visuelle/aérienne reste exclue de M5. Les interventions M5.3 maîtrisent les avaries sans restaurer la coque ; un sous-marin détruit reste immobilisé et refuse les commandes, sans écran de fin de mission (M6).
+
+### P1 — Périscope : observation et désignation visuelles
+
+**Statut :** implémenté le 4 novembre 2026 ; essai sur téléphone réel et équilibrage à confirmer. Cet incrément précède M6 et ne livre pas la mission complète.
+
+**Objectif joueur :** après une recherche sonar ou indépendamment de celle-ci, rejoindre la profondeur périscopique, observer le convoi et désigner un navire depuis le poste Capitaine.
+
+#### Livrables
+
+- Montée, abaissement et orientation du périscope par le Capitaine.
+- Utilisation de la surface jusqu'à 14 m inclus, jusqu'à 6 nœuds inclus ; abaissement automatique hors limites avec motif visible, sans remontée automatique. Valeurs configurables ; l'observation en surface est autorisée depuis l'ajustement du 5 novembre 2026.
+- Vue tactile stylisée : horizon, réticule, relèvement absolu et angle relatif à l'étrave ; rotation indépendante sur 360° par glissement ou boutons, champ de 40°, sans zoom. Silhouettes 2D dépendant du type, de l'orientation et de la distance ; pas de vraie 3D.
+- Portée initiale configurable de 8 km, de jour, sans météo, vagues masquantes ni occultation entre navires. Vue masquée et absence d'observation lorsque le périscope est abaissé.
+- Visibilité autoritaire, sans nom, identité réelle ou distance exacte affichés automatiquement.
+- Création volontaire d'un contact par sélection d'une silhouette ; identifiant neutre, relèvement actualisé tant qu'il est visible, puis dernière observation figée et horodatée. Contact ancien après 30 s et expiré après 120 s sans observation, délais configurables ; pas de fusion automatique après perte.
+- Partage explicite au Sonar et à l'Armement : identifiant, dernier relèvement observé, heure et description visuelle disponible. Pas de distance exacte, de position précise sur la carte, d'association sonar automatique, de fusion manuelle ni de préparation de tir depuis un contact visuel.
+- Capitaine humain obligatoire en solo, quatre autres postes tenus par des bots ; contrainte validée au lobby côté serveur. Le bot Capitaine reste possible en multijoueur, sans identification omnisciente.
+- Protocole versionné, permissions serveur et snapshots limités aux informations observables.
+
+#### Critères de validation
+
+- Le Capitaine peut observer et partager un contact sans observation sonar préalable.
+- La direction et la taille apparente d'une silhouette évoluent avec la géométrie simulée ; un navire non visible n'est pas transmis pour être simplement masqué par le client.
+- Les limites de profondeur/vitesse sont appliquées côté autoritaire et expliquées dans l'interface.
+- Les commandes sont utilisables sans clavier sur une largeur de 360 px ; le démarrage solo impose le Capitaine humain et les quatre autres postes bots, sans conflit de commandes. Les compositions multijoueurs restent possibles.
+- Une perte de vue fige les mesures ; le passage à l'état ancien et l'expiration respectent les délais sans fuite d'information sur les déplacements cachés.
+- Le partage fonctionne sans piste sonar, uniquement vers les destinataires prévus, et ne rend pas un contact visuel utilisable comme piste de tir.
+- Les mêmes observations et commandes donnent les mêmes résultats sur une même cible ; les permissions, bornes et projections sont testées.
+- `make check-all` et `make test` réussissent ; une recette navigateur valide observation, orientation et partage.
+
+#### Découpage technique et validation
+
+1. **Simulation :** état du périscope, configuration des seuils, visibilité déterministe, mesures de silhouettes et cycle de vie des contacts. Tester les limites inclusives, les valeurs non finies, l'abaissement automatique, le passage 359°/0°, les bords du champ et de portée, la perte de vue et les délais.
+2. **Protocole et serveur :** commandes Capitaine, projections par rôle, partage et version du protocole ; imposer le Capitaine humain au démarrage solo. Tester refus des autres rôles, absence de coordonnées/identités ennemies privées, absence d'observations périscope abaissé, maintien des compositions multijoueurs et aller-retour `postcard`.
+3. **Client :** vue périscopique, contrôles tactiles, création/sélection/partage, contacts anciens et motifs d'indisponibilité ; adapter le lobby solo. Vérifier que le rendu ne décide pas de la visibilité et que les contacts visuels restent distincts des pistes de tir.
+4. **Recette :** lancer seul comme Capitaine, donner les consignes au bot Pilote, observer un convoi sans sonar préalable, partager un contact, le perdre de vue puis constater ancienneté et expiration. Vérifier la taille/orientation des silhouettes, l'abaissement aux limites et l'ergonomie à 360 px.
+
+Les valeurs initiales sont des paramètres d'équilibrage centralisés dans `PeriscopeConfig`, pas des constantes dispersées. L'implémentation couvre visibilité/limites, perte/ancienneté/expiration, historique borné, rejeu, permissions, filtrage par rôle, fixtures v10 et contrainte solo. La vérification navigateur couvre le parcours Capitaine et l'affichage à 360 px ; elle ne remplace pas l'essai sur téléphone réel. Voir la [recette P1](recette-p1.md).
+
+**Hors périmètre P1 :** briefing de mission, reconnaissance du cargo objectif selon ce briefing, victoire/défaite, extraction, bilan, difficultés, deuxième escorte, fusion visuel/sonar et conduite de tir à partir d'un contact visuel. La détection du périscope par l'ennemi est également exclue, uniquement à titre temporaire ; les mécanismes acoustiques existants restent actifs.
+
+### P2 — Suivi obligatoire : détection du périscope
+
+**Statut :** à réaliser après P1 ; position exacte par rapport aux tranches M6 à décider. Ne pas supprimer ce suivi lors de la clôture de P1.
+
+- Définir les conditions d'observation du périscope exposé par les bâtiments ennemis et les paramètres de visibilité.
+- Alimenter la perception privée de l'escorte par une observation imparfaite, jamais par un accès continu à la position réelle du joueur.
+- Préciser le risque présenté au joueur sans confirmer magiquement une détection ennemie.
+- Valider qu'un périscope abaissé ou hors conditions de visibilité ne produit pas d'observation visuelle, qu'un périscope exposé dans les conditions définies peut en produire une, et que la poursuite repose ensuite sur la piste privée vieillissante.
+- Mettre à jour le GDD et ajouter des tests déterministes de détection, de perte et d'absence d'omniscience. La détection aérienne n'est pas incluse par défaut.
 
 ## 10. M6 - Mission de référence complète
 
 **Objectif joueur :** jouer de bout en bout la mission définie dans le GDD.
+
+**Ordre retenu :** livrer d'abord P1. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. Limite de temps et autres causes de défaite restent à détailler lors du cadrage M6. P1 ne livre ni ces règles ni l'écran de fin.
 
 ### Contenu
 

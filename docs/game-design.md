@@ -105,6 +105,7 @@ Les cinq rôles existants sont conservés. Cette répartition réduit les change
 
 - carte tactique et objectifs ;
 - pistes partagées par le sonar ;
+- vue périscopique et contacts visuels (P1) ;
 - état synthétique du sous-marin ;
 - ordres actifs et disponibilité des postes ;
 - chronologie des événements importants.
@@ -112,12 +113,13 @@ Les cinq rôles existants sont conservés. Cette répartition réduit les change
 **Commandes principales :**
 
 - désigner une piste prioritaire et une cible ;
+- monter, abaisser et orienter le périscope, créer et partager un contact visuel (P1) ;
 - tracer une route et poser des repères ;
 - définir le niveau de discrétion ;
 - donner des ordres aux bots ;
 - autoriser le tir et déclencher les procédures d'urgence.
 
-Le capitaine ne contrôle pas directement les instruments des joueurs présents. En solo, il peut ouvrir n'importe quel poste et commander tous les bots.
+Le capitaine ne contrôle pas directement les instruments des joueurs présents. **Depuis P1 :** en solo, le joueur occupe obligatoirement le poste Capitaine et les quatre autres postes sont tenus par des bots qu'il commande ; aucun changement de poste n'est nécessaire pour accéder au périscope. Cette contrainte ne supprime pas le bot Capitaine des compositions multijoueurs qui en ont besoin.
 
 ### 4.2 Pilotage
 
@@ -295,6 +297,25 @@ La confiance augmente avec des observations cohérentes et diminue lorsque le co
 
 Paramètres M3 provisoires : l'écoute passive produit un balayage par seconde, le ping actif possède un délai de huit secondes et les pistes expirent après environ une minute sans observation exploitable. Ces valeurs servent à valider la boucle de détection avant les sessions d'équilibrage.
 
+#### Périscope — observation et désignation visuelles (P1, implémenté)
+
+**Périmètre retenu le 4 novembre 2026 :** développer le périscope avant la mission complète M6. Le Sonar recherche et suit le convoi ; le Capitaine observe les silhouettes et identifie lui-même les navires. L'observation visuelle ne dépend pas de l'existence préalable d'une piste sonar.
+
+- Le Capitaine monte et abaisse explicitement le périscope. Il est utilisable de la surface jusqu'à 14 m inclus, jusqu'à 6 nœuds inclus. La profondeur périscopique nominale reste 12 m, avec une marge d'immersion de 2 m ; aucune plongée minimale n'est requise. Tout dépassement abaisse automatiquement le périscope avec un motif visible ; le retour dans les limites ne le remonte pas automatiquement.
+- La vue stylisée présente un horizon, un réticule, un relèvement absolu et un angle relatif à l'étrave. Rotation libre sur 360°, indépendante du cap du sous-marin, par glissement horizontal ou boutons tactiles ; champ de vision de 40°, sans zoom en P1. Périscope abaissé, la vue est masquée et aucune observation n'est produite.
+- Les instruments angulaires sont intégrés à l'image : ruban de relèvement absolu en haut, ruban relatif au sous-marin en bas, petites graduations chaque degré, grandes tous les 5° et chiffres tous les 10°. Les repères centraux restent fixes ; les rubans défilent selon l'orientation observée, avec passage continu par le nord. Le relatif indique AV (avant), TD (tribord), BD (bâbord) et AR (arrière), sans estimation de distance. Les graduations du réticule central utilisent la même projection angulaire que les silhouettes. Profondeur et vitesse restent au-dessus de l'image ; les instruments angulaires disparaissent quand le périscope est abaissé pour laisser les messages centrés lisibles.
+- Les silhouettes 2D varient selon le type et l'orientation du navire ; leur direction et leur taille apparente dépendent de la géométrie réelle. La simulation limite la visibilité à 8 km, en conditions de jour constantes. P1 n'inclut ni météo, ni vagues masquantes, ni occultation entre navires. Aucune vraie 3D n'est requise.
+- Aucun nom, identité réelle, position ou distance exacte n'est affiché automatiquement. La reconnaissance repose sur les caractéristiques visibles des silhouettes, pas sur une étiquette révélant le navire.
+- Le Capitaine touche une silhouette puis choisit « Créer un contact ». Le contact reçoit un identifiant neutre (« Visuel 1 »), jamais l'identité réelle du navire, et peut être sélectionné puis explicitement partagé vers le Sonar et l'Armement, même sans piste sonar préalable.
+- Tant que le contact reste visible, son relèvement est actualisé. Après perte de vue, la dernière observation est figée et horodatée, sans suivi caché ; le contact devient ancien après 30 secondes et expire après 2 minutes sans observation. Une nouvelle observation ne fusionne pas automatiquement avec un ancien contact perdu.
+- Les horodatages sont des secondes simulées depuis le début de mission. L'historique est borné à 64 contacts ; une création répétée sur une silhouette continuellement visible conserve le même contact. Après perte de vue, l'ancien contact n'est pas réassocié : une nouvelle création est nécessaire.
+- Le partage contient l'identifiant du contact, le dernier relèvement observé, l'heure de l'observation et la description visuelle disponible. Il ne crée aucune position précise ni distance inventée sur la carte. P1 n'inclut ni association automatique avec le Sonar, ni fusion manuelle, ni préparation de tir depuis un contact visuel : l'Armement conserve ses solutions fondées sur les pistes sonar partagées.
+- En solo, le joueur est obligatoirement Capitaine et les quatre autres postes sont des bots. Aucun bot ne reçoit d'identification omnisciente.
+
+**Limitation temporaire explicite :** P1 ne simule pas la détection du périscope par l'ennemi. Cela ne rend pas le sous-marin invisible aux mécanismes acoustiques existants. La détection du périscope doit être ajoutée dans le suivi P2 de la roadmap ; son absence n'est pas une règle définitive.
+
+**Réglages initiaux validés, à équilibrer :** profondeur nominale 12 m et marge d'immersion 2 m, soit une plage autorisée de 0 à 14 m (règle étendue à la surface le 5 novembre 2026), vitesse maximale 6 nœuds, champ de vision 40°, portée 8 000 m, ancienneté 30 s et expiration 120 s. Ces valeurs sont centralisées dans `MissionConfig::periscope`. Le protocole v10 projette seulement les mesures visuelles autorisées ; le client fournit le bouton « PERISCOPE / CARTE », la sélection de silhouette, le partage et des consignes réglables au bot Pilote. Voir la [recette P1](recette-p1.md) ; l'équilibrage et l'essai sur téléphone réel restent à confirmer.
+
 ### 6.6 Comportement ennemi
 
 Les navires marchands suivent une route et tentent de rejoindre une zone de sortie. Les escortes utilisent une machine à états :
@@ -411,6 +432,10 @@ La première mission complète sert de scénario directeur :
 
 > Intercepter un convoi marchand, identifier puis couler un cargo prioritaire, et quitter la zone malgré deux escortes.
 
+**Cadrage M6 retenu le 4 novembre 2026 (cible, hors P1) :** le briefing décrit visuellement le cargo prioritaire, par exemple par ses cheminées, ses mâts et sa silhouette, sans révéler sa position. Le Capitaine l'identifie au périscope et le désigne sans confirmation automatique de son choix. Une erreur est possible : couler un autre cargo ne remplit pas l'objectif. La reconnaissance n'est pas attribuée automatiquement au Sonar. Après destruction du bon cargo, le sous-marin doit rejoindre vivant une zone d'extraction fixe connue dès le briefing. Ce cadrage retient l'extraction explicite plutôt qu'une simple perte de poursuite pour la première mission.
+
+Le briefing, l'objectif prioritaire, les conditions de fin et le bilan ne font pas partie du développement P1 consacré au périscope.
+
 ### 7.2 Conditions de victoire
 
 - objectif principal accompli ;
@@ -453,7 +478,7 @@ Le bilan explique la partie au lieu de ne montrer qu'un score : objectifs, navir
 
 ### 8.3 Navigation entre postes
 
-Un joueur voit d'abord son poste. Le capitaine et le joueur solo peuvent changer de poste depuis une barre permanente. En multijoueur, les autres postes sont consultables en lecture seule uniquement si la règle de mission l'autorise.
+Un joueur voit d'abord son poste. **Depuis P1 :** en solo, le joueur est obligatoirement Capitaine, accède directement au périscope et coordonne les quatre autres postes tenus par des bots ; un changement de poste n'est pas requis. En multijoueur, les autres postes sont consultables en lecture seule uniquement si la règle de mission l'autorise.
 
 ### 8.4 Communication
 

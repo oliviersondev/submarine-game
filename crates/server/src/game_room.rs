@@ -158,7 +158,12 @@ fn command_allowed_for_role(role: CrewRole, command: &PlayerCommand) -> bool {
                 | PlayerCommand::PurgeTube(_)
         ) | (
             CrewRole::Captain,
-            PlayerCommand::AuthorizeShot { .. } | PlayerCommand::OrderWeaponsBot { .. }
+            PlayerCommand::AuthorizeShot { .. }
+                | PlayerCommand::OrderWeaponsBot { .. }
+                | PlayerCommand::SetPeriscopeRaised(_)
+                | PlayerCommand::SetPeriscopeBearing(_)
+                | PlayerCommand::CreateVisualContact { .. }
+                | PlayerCommand::ShareVisualContact(_)
         )
     )
 }
@@ -224,6 +229,12 @@ fn send_snapshots(
 
 fn project_mission(sim: &Simulation, role: CrewRole) -> MissionSnapshot {
     MissionSnapshot {
+        periscope: (role == CrewRole::Captain).then(|| sim.periscope_measurements()),
+        visual_contacts: match role {
+            CrewRole::Captain => sim.visual_contacts(false),
+            CrewRole::Sonar | CrewRole::Weapons => sim.visual_contacts(true),
+            _ => vec![],
+        },
         submarine: project_submarine(sim, role),
         sonar: (role == CrewRole::Sonar).then(|| sim.sonar_measurements()),
         tactical: matches!(role, CrewRole::Captain | CrewRole::Weapons)
@@ -319,6 +330,103 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn periscope_commands_are_captain_only() {
+        for command in [
+            PlayerCommand::SetPeriscopeRaised(true),
+            PlayerCommand::SetPeriscopeBearing(30.0),
+            PlayerCommand::CreateVisualContact { observation_id: 1 },
+            PlayerCommand::ShareVisualContact(shared::VisualContactId(1)),
+        ] {
+            for role in CrewRole::ALL {
+                assert_eq!(
+                    command_allowed_for_role(role, &command),
+                    role == CrewRole::Captain
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn visual_projection_shares_only_contacts_not_private_observations() {
+        let mut sim = Simulation::new();
+        // Surface observation must work immediately, without a diving command.
+        assert_eq!(sim.state.depth, 0.0);
+        sim.apply_command(PlayerCommand::SetPeriscopeRaised(true))
+            .unwrap();
+        let captain = project_mission(&sim, CrewRole::Captain);
+        let scope = captain.periscope.unwrap();
+        assert!(!scope.silhouettes.is_empty());
+        sim.apply_command(PlayerCommand::CreateVisualContact {
+            observation_id: scope.silhouettes[0].observation_id,
+        })
+        .unwrap();
+        assert_eq!(
+            project_mission(&sim, CrewRole::Captain)
+                .visual_contacts
+                .len(),
+            1
+        );
+        for role in [
+            CrewRole::Sonar,
+            CrewRole::Weapons,
+            CrewRole::Engineer,
+            CrewRole::Pilot,
+        ] {
+            let view = project_mission(&sim, role);
+            assert!(view.periscope.is_none());
+            assert!(view.visual_contacts.is_empty());
+        }
+        sim.apply_command(PlayerCommand::ShareVisualContact(shared::VisualContactId(
+            1,
+        )))
+        .unwrap();
+        for role in [CrewRole::Sonar, CrewRole::Weapons] {
+            let view = project_mission(&sim, role);
+            assert_eq!(view.visual_contacts.len(), 1);
+            assert!(view.periscope.is_none());
+        }
+        for role in [CrewRole::Engineer, CrewRole::Pilot] {
+            assert!(project_mission(&sim, role).visual_contacts.is_empty());
+        }
+        // The visual contact never enters the acoustic fire-control inputs.
+        assert!(sim.shared_track_measurements().shared_tracks.is_empty());
+        let view = project_mission(&sim, CrewRole::Sonar);
+        assert_eq!(
+            shared::codec::decode::<MissionSnapshot>(&shared::codec::encode(&view)).unwrap(),
+            view
+        );
+    }
+
+    #[test]
+    fn rejected_periscope_command_only_replies_to_originator() {
+        let (tx, mut rx) = mpsc::channel(2);
+        let (other, mut other_rx) = mpsc::channel(2);
+        let players = HashMap::from([
+            (PlayerId(1), (CrewRole::Sonar, tx)),
+            (PlayerId(2), (CrewRole::Captain, other)),
+        ]);
+        let mut sim = Simulation::new();
+        handle_command(
+            &mut sim,
+            &players,
+            &HashSet::from([CrewRole::Sonar, CrewRole::Captain]),
+            request(
+                CrewRole::Sonar,
+                GameRoomAction::Player(PlayerCommand::SetPeriscopeBearing(90.0)),
+            ),
+        );
+        assert_eq!(sim.periscope_measurements().bearing, 0.0);
+        assert!(matches!(
+            rx.try_recv().unwrap().payload,
+            ServerPayload::Error {
+                error: ProtocolError::CommandNotAllowedForRole,
+                ..
+            }
+        ));
+        assert!(other_rx.try_recv().is_err());
     }
 
     #[test]

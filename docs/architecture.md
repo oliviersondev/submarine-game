@@ -111,11 +111,12 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Présence | retrait à la déconnexion | période de grâce, bot de remplacement et reprise de rôle |
 | Navigation | consignes et valeurs réelles, inertie, plongée, ballasts, remontée d'urgence et dérive liée à l'inondation | assiette et stabilité |
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
+| Périscope | vue 2D, conditions d'utilisation autoritaires et contacts visuels autonomes partageables | détection ennemie du périscope (P2), météo et enrichissement visuel |
 | Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
 | Ingénierie | endurance, compartiments, dégâts, pompage, isolation, incendies, pannes, interventions temporisées et bot d'avaries | distribution détaillée, équilibrage et ergonomie enrichie |
 | IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche, attaque non guidée et retour au convoi | bots de poste complets et tactiques enrichies |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
-| Protocole | version 7, identifiants opaques, projections par rôle, diagnostics d'armement, pings entendus et accusés de commandes | reprise et négociation de compatibilité |
+| Protocole | version 10, identifiants opaques, projections par rôle, armement, avaries, périscope et contacts visuels, accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -248,6 +249,20 @@ Une salle possède une seule file séquentielle de commandes. Un client lent ne 
 | Accessibility | taille tactile, contraste, texte et réduction des animations |
 
 Le client peut prédire un retour d'interface, mais ne prédit pas les contacts, impacts, dégâts ou ressources autoritaires.
+
+### 5.6 P1 — Périscope (implémenté le 4 novembre 2026)
+
+Les frontières de crates sont conservées : `simulation/src/periscope.rs` calcule les conditions d'utilisation, la visibilité et les observations visuelles ; `shared/src/periscope.rs` porte les types sérialisables et la configuration ; `server/src/game_room.rs` valide les permissions Capitaine et projette les seules données observables ; `client/src/periscope_ui.rs` affiche une vue à silhouettes 2D et soumet des intentions. Aucune dépendance n'a été ajoutée dans la simulation.
+
+Une silhouette est dessinée depuis un relèvement, des dimensions angulaires et un profil apparent, sans transmettre l'entité ennemie complète, son identité interne ou ses coordonnées exactes. Seuls les navires à flot, dans le champ et la portée autorisés sont projetés. Les jetons d'observation changent après perte de visibilité ; un lien vers un contact propre ne subsiste que pendant l'observation ininterrompue. Les contacts visuels sont séparés des pistes sonar et des entrées de conduite de tir.
+
+La mémoire est bornée à 64 contacts. Le relèvement et l'heure sont actualisés uniquement à vue, puis figés à la perte ; l'âge utilise le temps simulé, avec état ancien à 30 s et expiration à 120 s. Le partage explicite vers Sonar/Armement porte un identifiant neutre, le dernier relèvement, l'heure et la description visuelle ; Pilote et Ingénierie ne reçoivent pas ces contacts. Il n'y a ni réassociation cachée après perte, ni fusion manuelle, ni conversion en piste de tir en P1.
+
+`MissionConfig::periscope` centralise les seuils initiaux : profondeur nominale `depth` de 12 m et marge d'immersion `depth_tolerance` de 2 m, 6 nœuds maximum, champ de 40° et portée de 8 km. Depuis le 5 novembre 2026, la plage autorisée va de 0 à `depth + depth_tolerance` (14 m par défaut), et non de 10 à 14 m : la surface est utilisable immédiatement. La simulation abaisse le périscope hors limites sans remontée automatique. Son orientation est indépendante du cap ; les snapshots incluent état et motifs d'indisponibilité. Périscope abaissé, aucune observation n'est produite. Le protocole v10 est incompatible v9 et possède des fixtures de commandes et des tests d'aller-retour des mesures/contacts. Cet ajustement des règles conserve les types et la version du protocole.
+
+Le lobby refuse un démarrage solo sans Capitaine humain (`SoloCaptainRequired`), sans modifier la salle ; les quatre autres postes sont des bots. Le client guide le choix de rôle et propose des consignes réglables au bot Pilote, en conservant le refus serveur si celui-ci est humain. Les compositions multijoueurs avec bot Capitaine restent possibles.
+
+La détection ennemie du périscope n'appartient pas à P1. Le suivi P2 devra produire des observations privées imparfaites pour l'escorte, puis réutiliser sa logique de piste vieillissante sans introduire d'omniscience. Les mécanismes de détection acoustique restent inchangés. Voir la [roadmap](roadmap.md) et la [recette P1](recette-p1.md).
 
 ## 6. Vue d'exécution
 
@@ -431,8 +446,9 @@ Les décisions proposées doivent être transformées en ADR séparés lorsqu'un
 | TD-01 | URL WebSocket locale codée en dur | résolu en M1 | URL dérivée de l'origine et configuration native `WS_URL` |
 | TD-02 | lobby global et démarrage à cinq joueurs | résolu en M1 | registre en mémoire, prêts, démarrage explicite et bots |
 | TD-03 | protocole non versionné | résolu en M1, évolué en M2 | version 2 et fixtures exactes `postcard` |
-| TD-04 | riposte, dégâts et contrôle des avaries livrés en M5.1–M5.3 | recette et équilibrage à confirmer | valider la boucle de survie puis M6 |
+| TD-04 | riposte, dégâts et contrôle des avaries livrés en M5.1–M5.3 | M5 clôturé par décision du porteur du projet | équilibrage continu ; P1 implémenté avant M6 |
 | TD-05 | PWA annoncée mais non configurée | attente incorrecte | ajouter manifeste/service worker ou corriger la promesse |
+| TD-06 | détection ennemie du périscope volontairement absente du périmètre P1 | futur avantage tactique sans risque visuel associé | réaliser le suivi P2 de la roadmap ; ne pas considérer cette absence comme définitive |
 
 ## 12. Glossaire
 

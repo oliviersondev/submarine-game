@@ -12,7 +12,7 @@ Une attaque se prépare à plusieurs postes :
 4. Le **Capitaine** autorise la configuration du tube.
 5. L'**Armement** confirme le lancement.
 
-En solo au poste Armement, les autres postes sont tenus par des bots. Le bot Sonar partage ses pistes suffisamment fiables ; le bot Capitaine autorise les solutions disponibles. Le bot Pilote ne positionne pas automatiquement le bâtiment pour une attaque.
+Depuis P1, le joueur solo occupe obligatoirement le poste Capitaine et commande le bot Armement. Pour utiliser directement ce guide au poste Armement, rejoindre une salle avec au moins un autre humain (par exemple Capitaine). Le bot Sonar partage ses pistes suffisamment fiables ; un bot Capitaine reste possible en multijoueur et autorise les solutions disponibles. Le bot Pilote ne positionne pas automatiquement le bâtiment pour une attaque.
 
 **Choisir une piste ne configure pas le tube. Charger un tube ne le rend pas prêt au tir.**
 

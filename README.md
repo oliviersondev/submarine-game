@@ -26,6 +26,8 @@ Un à cinq joueurs créent ou rejoignent une salle éphémère par son code cour
 
 Chaque joueur peut se déclarer prêt. Un joueur démarre explicitement la mission ; les rôles libres sont alors affichés et conservés comme bots. Plusieurs salles indépendantes peuvent fonctionner dans le même processus. Il n'y a ni persistance ni reconnexion à ce stade.
 
+**En solo, le joueur doit être Capitaine** et les quatre autres postes sont des bots. Les autres rôles humains restent possibles en multijoueur.
+
 ### Contrôles
 
 Les commandes clavier permettent de tester le flux réseau avant l'ajout des interfaces de station :
@@ -36,7 +38,7 @@ Les commandes clavier permettent de tester le flux réseau avant l'ajout des int
 | `Sonar` | `Espace` ping sonar |
 | `Engineer` | `1` diesels, `2` moteurs électriques, `3` ventilation, `4` recharge, `5` réparation moteur |
 | `Weapons` | Contrôles tactiles : piste, tube, réglages, préparation et confirmation du tir |
-| `Captain` | Ordre au bot Pilote, ordre de préparation au bot Armement et autorisation du tir |
+| `Captain` | Périscope tactile, contacts visuels, consignes au bot Pilote, préparation au bot Armement et autorisation du tir |
 
 Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes actives et la dernière erreur. Le poste Pilote distingue consignes et mesures réelles et contrôle les ballasts ainsi que la remontée d'urgence. Le poste Ingénierie contrôle propulsion, ventilation et recharge. Le Sonar suit des observations imparfaites, gère ses pistes et les partage avec le Capitaine et l'Armement. Leur carte tactique ne montre que ces estimations partagées. Le Capitaine peut aussi transmettre au bot Pilote une consigne de cap, vitesse et profondeur.
 
@@ -44,13 +46,19 @@ Le HUD affiche le code de salle, le tick serveur, le bruit propre, les alertes a
 
 Le **[guide joueur Armement](docs/guide-armement.md)** explique les mesures de l'écran, chaque bouton, la procédure complète et les messages de blocage.
 
-1. Créer une salle au poste `Weapons` (`?role=weapons`), se déclarer prêt et démarrer. Le bot Sonar partage ses pistes lorsqu'elles deviennent fiables.
+1. Créer une salle au poste `Weapons` (`?role=weapons`) et faire rejoindre au moins un second humain, par exemple Capitaine, avant de démarrer. Pour jouer seul, choisir Capitaine et utiliser le bot Armement. Le bot Sonar partage ses pistes lorsqu'elles deviennent fiables.
 2. Sélectionner une piste et un tube avant ; **Charger**, attendre 20 s, puis **Configurer**. Le bouton de réglage alterne profondeur de torpille, correction du cap cible et correction de sa vitesse ; `−` et `+` modifient le réglage, puis **Configurer** l'applique.
 3. **Inonder** (8 s), puis **Ouvrir** (3 s). Le bot Capitaine autorise une solution disponible. Un Capitaine humain utilise **Autoriser** sur le tube configuré.
 4. Le sous-marin doit être à 20 m ou moins et la solution dans le demi-plan du tube (avant, ou arrière pour le tube 5). **Tirer…**, puis **CONFIRMER TIR** lance une torpille non guidée à 40 nœuds, limitée à 8 km.
 5. Après le tir, la porte se ferme automatiquement (3 s) ; **Purger** (8 s) rend le tube rechargeable. Il existe cinq torpilles au total, réparties entre réserve et tubes.
 
 Au poste Capitaine, sélectionner une piste puis **Ordre bot** prépare une attaque si l'Armement est vacant ; **Autoriser** déclenche ensuite le tir du bot prêt. Sans humain aux postes Capitaine et Armement, le bot Capitaine désigne une piste marchande fiable. Les opérations de tube produisent du bruit. Les panneaux d'armement se parcourent par glissement si leur contenu dépasse l'écran. Les explosions ne sont rapportées qu'à portée d'écoute ; elles ne révèlent ni identité, ni position exacte, ni intégrité réelle d'un ennemi.
+
+### Essayer le périscope P1
+
+Créer une salle comme Capitaine (`?role=captain`) et démarrer. Ouvrir **PERISCOPE / CARTE** puis **MONTER / BAISSER** : l'observation est possible dès la surface, de 0 à 14 m inclus et jusqu'à 6 nœuds inclus. Pour observer en restant immergé, régler dans ce panneau les consignes du bot Pilote à **cap 000 / vitesse 2 kn / profondeur 12 m**, puis toucher **ORDONNER**. Orienter la vue par glissement ou boutons, toucher une silhouette puis **CREER CONTACT** et **PARTAGER**. Le bouton **CONTACT SUIVANT** parcourt les contacts.
+
+Les contacts partagés sont consultables au Sonar et à l'Armement, sans distance exacte ni lien automatique avec une piste de tir. Voir la [recette P1](docs/recette-p1.md). La détection ennemie du périscope est **temporairement absente**, suivie en P2 ; l'écoute acoustique ennemie reste active.
 
 ## Architecture
 
@@ -115,7 +123,7 @@ open http://127.0.0.1:8080
 
 Le premier build du client prend ~2 minutes (compilation de Bevy pour WASM). Les builds suivants sont quasi-instantanés grâce au cache Cargo.
 
-Sans paramètre d'URL, le client demande un rôle puis permet de créer une salle ou de saisir au clavier ou au pavé tactile les six chiffres d'un code avant d'ouvrir la connexion. Pour les tests rapides, `?role=pilot` (ou un autre nom de `CrewRole`) sélectionne le poste et crée directement une salle.
+Sans paramètre d'URL, le client demande un rôle puis permet de créer une salle ou de saisir au clavier ou au pavé tactile les six chiffres d'un code avant d'ouvrir la connexion. Pour les tests rapides en solo, `?role=captain` sélectionne le poste et crée directement une salle. Les autres noms de `CrewRole` restent acceptés, mais le démarrage avec un unique humain hors du poste Capitaine est refusé.
 
 Depuis Trunk sur le port `8080`, l'URL WebSocket utilise le nom d'hôte de la page et le port de développement `3000`. Sur une autre origine, elle utilise le même hôte, port et un schéma `ws`/`wss` correspondant à la page. En exécution native de développement, `WS_URL` permet de la remplacer.
 
@@ -136,7 +144,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `9`). `RoomId`, `SessionId`, `PlayerId`, `CommandId` et `TrackId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 a ajouté les charges, dégâts persistants, compartiments et alertes. La version 9 ajoute le contrôle des avaries, les incendies et les pannes : pompage, isolation, équipe unique et interventions temporisées. Serveur et client doivent être mis à jour ensemble ; v9 est incompatible avec v8.
+Chaque enveloppe porte `version: u16` (actuellement `10`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 a ajouté les charges, dégâts persistants, compartiments et alertes. La version 9 a ajouté le contrôle des avaries, les incendies et les pannes. La version 10 ajoute la configuration du périscope, ses commandes/mesures visuelles, les contacts partagés et les erreurs associées. Serveur et client doivent être mis à jour ensemble ; v10 est incompatible avec v9.
 
 ### Client → Serveur (`ClientPayload`)
 

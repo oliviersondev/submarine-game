@@ -2,7 +2,7 @@
 
 ## Préparer
 
-1. Redémarrer `make server`, lancer `make client`, recharger tous les onglets : protocole v9 incompatible v8.
+1. Redémarrer `make server`, lancer `make client`, recharger tous les onglets : protocole v10 incompatible v9/v8.
 2. Ouvrir une salle avec Pilote, Sonar, Capitaine et Ingénierie humains. Garder le Capitaine sans autorisation de tir pour ne pas couler l'escorte ; les rôles vacants sont tenus par des bots.
 3. Tous prêts, démarrer. Vérifier coque 100%, eau/feu 0%, cinq systèmes OK, équipe disponible, aucune pompe ni isolation.
 4. Refaire l'approche de [M5.2](recette-m5.2.md) : vers le nord, 8 nœuds et 100 m, Sonar émettant périodiquement pour provoquer la recherche. Ralentir au contact pour subir une passe, puis tenter de rompre le contact. L'approche peut prendre plusieurs minutes et n'assure pas un coup proche ; aucune avarie de recette n'est injectée par une commande de jeu.

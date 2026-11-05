@@ -10,6 +10,12 @@ Pour valider la riposte et les dégâts : **[Recette M5.2](recette-m5.2.md)**.
 
 Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.3.md)** (pompes, isolation, incendies, pannes et bot Ingénierie).
 
+## Dernier incrément — Périscope
+
+M5 est clôturé par décision du porteur du projet. **P1 : observation et désignation visuelles au périscope** est implémenté avant la mission complète M6 : vue à silhouettes 2D, usage en mouvement à profondeur périscopique et contacts visuels autonomes partageables. Le joueur solo est obligatoirement Capitaine, les quatre autres postes étant des bots. Le partage visuel ne permet pas de préparer directement un tir. Voir la **[recette P1](recette-p1.md)** ; l'essai sur téléphone réel et l'équilibrage restent à confirmer.
+
+Voir les [règles du périscope](game-design.md#65-détection-et-pistes) et le [découpage P1/P2 dans la roadmap](roadmap.md#p1--périscope--observation-et-désignation-visuelles). **La détection du périscope par l'ennemi est temporairement absente de P1 ; elle reste explicitement à réaliser en P2.**
+
 | Document | Objet | Statut |
 |---|---|---|
 | [Game Design Document](game-design.md) | vision, boucle de jeu, rôles, règles et expérience mobile | brouillon 0.1 |

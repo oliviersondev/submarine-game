@@ -2,6 +2,7 @@ mod damage;
 mod depth_charges;
 mod detection;
 mod enemy_ai;
+mod periscope;
 mod tracks;
 mod weapons;
 mod world;
@@ -23,6 +24,7 @@ const PING_COOLDOWN_SECONDS: f32 = 8.0;
 pub enum SimulationError {
     Weapons(ProtocolError),
     DamageControl(ProtocolError),
+    Periscope(ProtocolError),
     TrackNotFound(TrackId),
     InvalidTrackMerge,
     SonarPingCoolingDown,
@@ -43,6 +45,7 @@ impl From<SimulationError> for ProtocolError {
         match error {
             SimulationError::Weapons(error) => error,
             SimulationError::DamageControl(error) => error,
+            SimulationError::Periscope(error) => error,
             SimulationError::TrackNotFound(id) => Self::TrackNotFound(id),
             SimulationError::InvalidTrackMerge => Self::InvalidTrackMerge,
             SimulationError::SonarPingCoolingDown => Self::SonarPingCoolingDown,
@@ -63,6 +66,7 @@ pub struct Simulation {
     ping_cooldown_remaining: f32,
     weapons: weapons::Weapons,
     damage: damage::Damage,
+    periscope: periscope::Periscope,
 }
 
 impl Simulation {
@@ -71,7 +75,7 @@ impl Simulation {
     }
 
     pub fn with_config(config: MissionConfig) -> Self {
-        Self {
+        let mut sim = Self {
             state: SubmarineState::default(),
             config,
             tick: 0,
@@ -83,7 +87,10 @@ impl Simulation {
             ping_cooldown_remaining: 0.0,
             weapons: weapons::Weapons::new(),
             damage: damage::Damage::default(),
-        }
+            periscope: periscope::Periscope::default(),
+        };
+        sim.update_periscope(0.0);
+        sim
     }
 
     pub fn tick(&mut self, dt: f32) -> Vec<GameEvent> {
@@ -92,6 +99,7 @@ impl Simulation {
         }
         if self.damage_summary().destroyed {
             self.tick = self.tick.wrapping_add(1);
+            self.update_periscope(dt);
             return vec![];
         }
         let mut events = self.sync_systems();
@@ -180,6 +188,7 @@ impl Simulation {
                 .update(dt, &mut self.world, self.config.weapons, &self.state),
         );
         events.extend(self.update_alerts());
+        self.update_periscope(dt);
         events
     }
 
@@ -219,6 +228,16 @@ impl Simulation {
             }
         }
         match command {
+            command @ (PlayerCommand::SetPeriscopeRaised(_)
+            | PlayerCommand::SetPeriscopeBearing(_)
+            | PlayerCommand::CreateVisualContact { .. }
+            | PlayerCommand::ShareVisualContact(_)) => {
+                self.update_periscope(0.0);
+                self.periscope
+                    .command(command)
+                    .map_err(SimulationError::Periscope)?;
+                self.update_periscope(0.0);
+            }
             PlayerCommand::SetHeading(value) if value.is_finite() => {
                 self.state.ordered_heading = value.rem_euclid(360.0);
             }
@@ -331,6 +350,25 @@ impl Simulation {
             BallastState::Hold
         };
         Ok(events)
+    }
+
+    fn update_periscope(&mut self, dt: f32) {
+        let destroyed = self.damage_summary().destroyed;
+        self.periscope.update(
+            &self.world,
+            &self.state,
+            self.config.periscope,
+            destroyed,
+            dt,
+        );
+    }
+
+    pub fn periscope_measurements(&self) -> shared::PeriscopeMeasurements {
+        self.periscope.measurements(self.config.periscope)
+    }
+
+    pub fn visual_contacts(&self, shared_only: bool) -> Vec<shared::VisualContact> {
+        self.periscope.contacts(shared_only)
     }
 
     pub fn automate_engineer(&mut self) {

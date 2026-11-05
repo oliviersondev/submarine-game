@@ -5,7 +5,7 @@
 1. Lancer `make server` et `make client` dans deux terminaux.
 2. Ouvrir `http://127.0.0.1:8080` dans quatre onglets : Pilote (création), Sonar, Capitaine et Ingénierie (même code de salle).
 3. Passer les quatre joueurs prêts et démarrer. Garder le Capitaine humain, sans autoriser de tir : ne pas laisser un bot couler l'escorte pendant cette recette.
-4. Recharger tous les onglets après une mise à jour : le protocole actuel est v9, incompatible v8/v7. Chaque scénario comparatif doit repartir d'une salle neuve ; ne pas réparer pendant cette recette de dégâts bruts.
+4. Recharger tous les onglets après une mise à jour : le protocole actuel est v10, incompatible v9/v8/v7. Chaque scénario comparatif doit repartir d'une salle neuve ; ne pas réparer pendant cette recette de dégâts bruts.
 
 ## 1. État initial et approche
 
