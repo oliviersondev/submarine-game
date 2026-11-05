@@ -5,6 +5,8 @@ mod button_activation;
 mod damage_control_ui;
 mod explosion_ui;
 mod network;
+mod periscope_graticule;
+mod periscope_ui;
 mod render;
 mod role;
 mod weapons_ui;
@@ -28,5 +30,6 @@ fn main() {
         .add_plugins(explosion_ui::ExplosionUiPlugin)
         .add_plugins(damage_control_ui::DamageControlUiPlugin)
         .add_plugins(weapons_ui::WeaponsUiPlugin)
+        .add_plugins(periscope_ui::PeriscopeUiPlugin)
         .run();
 }

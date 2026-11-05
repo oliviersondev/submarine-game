@@ -24,6 +24,13 @@ pub(crate) struct Vessel {
 }
 
 impl Vessel {
+    pub(crate) fn silhouette(&self, index: usize) -> shared::SilhouetteKind {
+        match self.kind {
+            VesselKind::Escort => shared::SilhouetteKind::Escort,
+            VesselKind::Cargo if index % 2 == 0 => shared::SilhouetteKind::SingleFunnelCargo,
+            VesselKind::Cargo => shared::SilhouetteKind::TwinFunnelCargo,
+        }
+    }
     pub(crate) fn afloat(&self) -> bool {
         self.integrity > 0.0
     }

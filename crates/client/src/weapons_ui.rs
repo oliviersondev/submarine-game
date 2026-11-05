@@ -74,6 +74,7 @@ pub fn spawn(parent: &mut ChildSpawnerCommands) {
         .with_children(|panel| {
         panel.spawn((WeaponStatus, Text::new("ARMEMENT"), TextFont { font_size: FontSize::Px(12.0), ..default() },
             TextColor(Color::srgb(0.8, 0.95, 1.0))));
+        crate::periscope_ui::spawn_shared_contacts(panel);
         for row in [vec![Action::Target, Action::Tube], vec![Action::Field, Action::Minus, Action::Plus],
             vec![Action::Configure, Action::Prepare], vec![Action::Fire, Action::Cancel]] {
             panel.spawn(Node { column_gap: px(4), width: percent(100), flex_shrink: 0.0, ..default() }).with_children(|line| {

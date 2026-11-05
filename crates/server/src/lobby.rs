@@ -166,6 +166,14 @@ impl RoomRegistry {
         if room.phase != LobbyPhase::Waiting {
             return Err(ProtocolError::RoomAlreadyStarted);
         }
+        if room.players.len() == 1
+            && !room
+                .players
+                .values()
+                .any(|player| player.role == CrewRole::Captain)
+        {
+            return Err(ProtocolError::SoloCaptainRequired);
+        }
         room.phase = LobbyPhase::Running;
         let config = room.config;
         let players: HashMap<_, _> = room
@@ -463,6 +471,40 @@ mod tests {
                 .count(),
             4
         );
+    }
+
+    #[tokio::test]
+    async fn solo_requires_captain_but_multiplayer_can_keep_captain_bot() {
+        for role in [
+            CrewRole::Pilot,
+            CrewRole::Sonar,
+            CrewRole::Engineer,
+            CrewRole::Weapons,
+        ] {
+            let mut registry = RoomRegistry::new();
+            let (room_id, _, _) = registry.create_room(role, channel());
+            assert_eq!(
+                registry.start_room(&room_id),
+                Err(ProtocolError::SoloCaptainRequired)
+            );
+            assert_eq!(
+                registry.snapshot(&room_id).unwrap().phase,
+                LobbyPhase::Waiting
+            );
+            let second = if role == CrewRole::Sonar {
+                CrewRole::Pilot
+            } else {
+                CrewRole::Sonar
+            };
+            registry.join_room(&room_id, second, channel()).unwrap();
+            registry.start_room(&room_id).unwrap();
+            assert!(registry
+                .snapshot(&room_id)
+                .unwrap()
+                .slots
+                .iter()
+                .any(|s| s.role == CrewRole::Captain && s.occupant == RoleOccupant::Bot));
+        }
     }
 
     #[test]
