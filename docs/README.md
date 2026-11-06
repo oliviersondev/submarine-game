@@ -14,7 +14,9 @@ Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.
 
 M5 est clôturé par décision du porteur du projet. **P1 : observation et désignation visuelles au périscope** est implémenté avant la mission complète M6 : vue à silhouettes 2D, usage en mouvement à profondeur périscopique et contacts visuels autonomes partageables. Le joueur solo est obligatoirement Capitaine, les quatre autres postes étant des bots. Le partage visuel ne permet pas de préparer directement un tir. Voir la **[recette P1](recette-p1.md)** ; l'essai sur téléphone réel et l'équilibrage restent à confirmer.
 
-Voir les [règles du périscope](game-design.md#65-détection-et-pistes) et le [découpage P1/P2 dans la roadmap](roadmap.md#p1--périscope--observation-et-désignation-visuelles). **La détection du périscope par l'ennemi est temporairement absente de P1 ; elle reste explicitement à réaliser en P2.**
+**P2 : détection du périscope** est implémenté : vigies sur tous les bâtiments à flot, cargos moins efficaces, acquisition progressive et transmission privée à l'escorte. Aucun avertissement ni indicateur de détection n'est ajouté à l'interface. Voir la **[recette P2](recette-p2.md)** ; la recette manuelle et l'équilibrage restent à confirmer. La détection de la coque en surface périscope rentré reste un suivi séparé.
+
+Voir les [règles du périscope](game-design.md#65-détection-et-pistes) et le [découpage P1/P2 dans la roadmap](roadmap.md#p1--périscope--observation-et-désignation-visuelles).
 
 | Document | Objet | Statut |
 |---|---|---|

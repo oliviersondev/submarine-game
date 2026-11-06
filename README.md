@@ -58,7 +58,7 @@ Au poste Capitaine, sélectionner une piste puis **Ordre bot** prépare une atta
 
 Créer une salle comme Capitaine (`?role=captain`) et démarrer. Ouvrir **PERISCOPE / CARTE** puis **MONTER / BAISSER** : l'observation est possible dès la surface, de 0 à 14 m inclus et jusqu'à 6 nœuds inclus. Pour observer en restant immergé, régler dans ce panneau les consignes du bot Pilote à **cap 000 / vitesse 2 kn / profondeur 12 m**, puis toucher **ORDONNER**. Orienter la vue par glissement ou boutons, toucher une silhouette puis **CREER CONTACT** et **PARTAGER**. Le bouton **CONTACT SUIVANT** parcourt les contacts.
 
-Les contacts partagés sont consultables au Sonar et à l'Armement, sans distance exacte ni lien automatique avec une piste de tir. Voir la [recette P1](docs/recette-p1.md). La détection ennemie du périscope est **temporairement absente**, suivie en P2 ; l'écoute acoustique ennemie reste active.
+Les contacts partagés sont consultables au Sonar et à l'Armement, sans distance exacte ni lien automatique avec une piste de tir. Voir la [recette P1](docs/recette-p1.md). Depuis P2, tous les bâtiments ennemis à flot peuvent repérer un périscope exposé ; les cargos sont moins efficaces et transmettent leurs observations à l'escorte. Une exposition proche, rapide ou prolongée augmente le risque, sans avertissement ni confirmation de détection dans l'interface. L'écoute acoustique ennemie reste active. Voir la [recette P2](docs/recette-p2.md).
 
 ## Architecture
 
@@ -144,7 +144,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `10`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 a ajouté les charges, dégâts persistants, compartiments et alertes. La version 9 a ajouté le contrôle des avaries, les incendies et les pannes. La version 10 ajoute la configuration du périscope, ses commandes/mesures visuelles, les contacts partagés et les erreurs associées. Serveur et client doivent être mis à jour ensemble ; v10 est incompatible avec v9.
+Chaque enveloppe porte `version: u16` (actuellement `11`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 a ajouté les charges, dégâts persistants, compartiments et alertes. La version 9 a ajouté le contrôle des avaries, les incendies et les pannes. La version 10 a ajouté la configuration du périscope, ses commandes/mesures visuelles, les contacts partagés et les erreurs associées. La version 11 ajoute les paramètres des vigies ennemies, sans nouvelle commande ni mesure de détection ennemie projetée. Serveur et client doivent être mis à jour ensemble ; v11 est incompatible avec v10.
 
 ### Client → Serveur (`ClientPayload`)
 

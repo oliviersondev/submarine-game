@@ -1,5 +1,52 @@
 use serde::{Deserialize, Serialize};
 
+/// P2 enemy lookout tuning; metres, seconds, degrees and confidence points.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PeriscopeDetectionConfig {
+    pub escort: LookoutConfig,
+    pub cargo: LookoutConfig,
+    /// Seconds to forget a full, unfinished acquisition without visibility.
+    pub memory_time: f32,
+    /// Acquisition multiplier at zero distance (1 at maximum range).
+    pub proximity_multiplier: f32,
+    /// Additional acquisition multiplier per knot of submarine speed.
+    pub speed_factor: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LookoutConfig {
+    pub range: f32,
+    /// Exposure needed at maximum range with a stationary submarine.
+    pub acquisition_time: f32,
+    pub bearing_error: f32,
+    pub range_error: f32,
+    pub confidence: f32,
+}
+
+impl Default for PeriscopeDetectionConfig {
+    fn default() -> Self {
+        Self {
+            escort: LookoutConfig {
+                range: 3_000.0,
+                acquisition_time: 12.0,
+                bearing_error: 5.0,
+                range_error: 0.25,
+                confidence: 60.0,
+            },
+            cargo: LookoutConfig {
+                range: 2_000.0,
+                acquisition_time: 24.0,
+                bearing_error: 9.0,
+                range_error: 0.4,
+                confidence: 40.0,
+            },
+            memory_time: 10.0,
+            proximity_multiplier: 3.0,
+            speed_factor: 0.15,
+        }
+    }
+}
+
 /// Initial P1 tuning: metres, knots, degrees and simulation seconds.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PeriscopeConfig {
