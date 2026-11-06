@@ -70,6 +70,138 @@ pub struct Simulation {
     periscope: periscope::Periscope,
 }
 
+#[cfg(test)]
+mod visual_fire_tests {
+    use super::*;
+    use shared::{ShotSettings, ShotTarget, VisualContactId};
+
+    fn observed() -> Simulation {
+        let mut sim = Simulation::new();
+        sim.world.vessels[0].x = 0.0;
+        sim.world.vessels[0].y = 1000.0;
+        sim.world.vessels[0].heading = 90.0;
+        sim.world.vessels[0].speed = 8.0;
+        sim.apply_command(PlayerCommand::SetPeriscopeRaised(true))
+            .unwrap();
+        let token = sim.periscope_measurements().silhouettes[0].observation_id;
+        sim.apply_command(PlayerCommand::CreateVisualContact {
+            observation_id: token,
+        })
+        .unwrap();
+        sim
+    }
+
+    fn designate(sim: &mut Simulation) {
+        sim.apply_command(PlayerCommand::DesignateVisualTarget {
+            contact: VisualContactId(1),
+            distance: 1000.0,
+            heading: 90.0,
+            speed: 8.0,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn visual_bot_prepares_without_any_sonar_track_and_waits_for_authorization() {
+        let mut sim = observed();
+        designate(&mut sim);
+        sim.apply_command(PlayerCommand::SetPeriscopeRaised(false))
+            .unwrap();
+        sim.apply_command(PlayerCommand::OrderWeaponsBot {
+            target: ShotTarget::Visual(1),
+        })
+        .unwrap();
+        // Advance procedures without invoking sonar acquisition at all.
+        for _ in 0..800 {
+            sim.weapons
+                .update(0.05, &mut sim.world, sim.config.weapons, &sim.state);
+            assert!(sim.automate_weapons(true, false).is_empty());
+        }
+        assert!(sim.sonar_measurements().tracks.is_empty());
+        let w = sim.weapons_measurements();
+        assert_eq!(w.tubes[0].phase, shared::TubePhase::Ready);
+        assert!(!w.tubes[0].authorized);
+        assert!(w.torpedoes.is_empty());
+        let settings = w.tubes[0].settings.unwrap();
+        assert_eq!(settings, ShotSettings::for_source(ShotTarget::Visual(1)));
+        designate(&mut sim);
+        sim.apply_command(PlayerCommand::OrderWeaponsBot {
+            target: ShotTarget::Visual(2),
+        })
+        .unwrap();
+        assert!(sim.automate_weapons(true, false).is_empty());
+        let settings = sim.weapons_measurements().tubes[0].settings.unwrap();
+        assert_eq!(settings.target, ShotTarget::Visual(2));
+        assert!(!sim.weapons_measurements().tubes[0].authorized);
+        sim.apply_command(PlayerCommand::AuthorizeShot { tube: 0, settings })
+            .unwrap();
+        assert!(sim
+            .automate_weapons(true, false)
+            .iter()
+            .any(|e| matches!(e, GameEvent::TorpedoFired { .. })));
+    }
+
+    #[test]
+    fn hidden_target_motion_does_not_change_estimate_or_solution_and_expiry_does_not_track_it() {
+        let mut sim = observed();
+        sim.apply_command(PlayerCommand::SetPeriscopeRaised(false))
+            .unwrap();
+        sim.state.x = 200.0;
+        sim.state.y = -300.0;
+        designate(&mut sim);
+        let estimate = sim.weapons_measurements().visual_target.unwrap();
+        assert_eq!((estimate.origin_x, estimate.origin_y), (0.0, 0.0));
+        sim.apply_command(PlayerCommand::LoadTube(0)).unwrap();
+        sim.weapons
+            .update(20.0, &mut sim.world, sim.config.weapons, &sim.state);
+        let settings = ShotSettings::for_source(ShotTarget::Visual(1));
+        sim.apply_command(PlayerCommand::ConfigureShot { tube: 0, settings })
+            .unwrap();
+        let before = sim.weapons_measurements();
+        sim.world.vessels[0].x = 100_000.0;
+        sim.world.vessels[0].heading = 270.0;
+        sim.world.vessels[0].speed = 30.0;
+        sim.update_periscope(121.0);
+        assert!(sim.visual_contacts(false).is_empty());
+        assert_eq!(sim.weapons_measurements(), before);
+        assert!(sim
+            .apply_command(PlayerCommand::DesignateVisualTarget {
+                contact: VisualContactId(1),
+                distance: 1000.0,
+                heading: 90.0,
+                speed: 8.0,
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn visual_replay_is_deterministic() {
+        fn run() -> Vec<shared::WeaponsMeasurements> {
+            let mut sim = observed();
+            designate(&mut sim);
+            sim.apply_command(PlayerCommand::SetPeriscopeRaised(false))
+                .unwrap();
+            sim.apply_command(PlayerCommand::OrderWeaponsBot {
+                target: ShotTarget::Visual(1),
+            })
+            .unwrap();
+            (0..900)
+                .map(|_| {
+                    sim.tick(0.05);
+                    sim.automate_weapons(true, false);
+                    if sim.weapons_measurements().tubes[0].phase == shared::TubePhase::Ready {
+                        let settings = sim.weapons_measurements().tubes[0].settings.unwrap();
+                        sim.apply_command(PlayerCommand::AuthorizeShot { tube: 0, settings })
+                            .unwrap();
+                    }
+                    sim.weapons_measurements()
+                })
+                .collect()
+        }
+        assert_eq!(run(), run());
+    }
+}
+
 impl Simulation {
     pub fn new() -> Self {
         Self::with_config(MissionConfig::new(0))
@@ -238,6 +370,21 @@ impl Simulation {
             }
         }
         match command {
+            PlayerCommand::DesignateVisualTarget {
+                contact,
+                distance,
+                heading,
+                speed,
+            } => {
+                self.update_periscope(0.0);
+                let (observation, origin) = self
+                    .periscope
+                    .firing_observation(contact)
+                    .map_err(SimulationError::Periscope)?;
+                self.weapons
+                    .designate_visual(observation, origin, distance, heading, speed)
+                    .map_err(SimulationError::Weapons)?;
+            }
             command @ (PlayerCommand::SetPeriscopeRaised(_)
             | PlayerCommand::SetPeriscopeBearing(_)
             | PlayerCommand::CreateVisualContact { .. }
@@ -512,7 +659,9 @@ impl Simulation {
                 })
             {
                 let _ = self.weapons.apply(
-                    PlayerCommand::OrderWeaponsBot { target: track.id },
+                    PlayerCommand::OrderWeaponsBot {
+                        target: shared::ShotTarget::Sonar(track.id),
+                    },
                     &self.state,
                     &tracks,
                     self.config.weapons,

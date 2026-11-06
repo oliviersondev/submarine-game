@@ -2900,6 +2900,8 @@ pub(crate) fn error_label(error: &ProtocolError) -> String {
         ProtocolError::VisualObservationLost => "SILHOUETTE PERDUE : OBSERVER A NOUVEAU".into(),
         ProtocolError::VisualContactNotFound => "CONTACT VISUEL EXPIRE".into(),
         ProtocolError::VisualContactLimitReached => "LIMITE DE CONTACTS VISUELS ATTEINTE".into(),
+        ProtocolError::InvalidVisualEstimate => "Estimations invalides : distance 100–30000m, cap 0–359 deg, vitesse 0–40kn".into(),
+        ProtocolError::VisualEstimateSuperseded => "Estimation visuelle remplacee : reconfigurer le tube puis autoriser de nouveau".into(),
         ProtocolError::TrackNotFound(track_id) => {
             format!("PISTE T{} INTROUVABLE", track_id.0)
         }

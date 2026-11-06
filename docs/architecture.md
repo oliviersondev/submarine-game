@@ -112,11 +112,11 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Navigation | consignes et valeurs réelles, inertie, plongée, ballasts, remontée d'urgence et dérive liée à l'inondation | assiette et stabilité |
 | Sonar | convoi déterministe, observations passives/actives et pistes incertaines | propagation et classification enrichies |
 | Périscope | vue 2D, conditions d'utilisation autoritaires, contacts visuels autonomes partageables et vigies ennemies (P2) | détection de la coque en surface, météo et enrichissement visuel |
-| Armement | tubes temporisés, solution depuis piste partagée, autorisation, torpilles et dégâts privés | types d'armes et effets d'avaries enrichis |
+| Armement | tubes temporisés, solution depuis piste sonar ou estimations visuelles manuelles, autorisation, torpilles et dégâts privés | télémètre, estimation assistée, types d'armes et effets d'avaries enrichis |
 | Ingénierie | endurance, compartiments, dégâts, pompage, isolation, incendies, pannes, interventions temporisées et bot d'avaries | distribution détaillée, équilibrage et ergonomie enrichie |
 | IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche, attaque non guidée et retour au convoi | bots de poste complets et tactiques enrichies |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
-| Protocole | version 11, identifiants opaques, projections par rôle, armement, avaries, périscope, contacts visuels et configuration des vigies, accusés de commandes | reprise et négociation de compatibilité |
+| Protocole | version 12, identifiants opaques, projections par rôle, armement sonar/visuel, avaries, périscope, contacts visuels et configuration des vigies, accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -164,7 +164,7 @@ C4Container
 
 ### 5.3 Crate `simulation`
 
-**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil, convoi déterministe, détection passive/active, pistes incertaines et automatisation minimale des bots Ingénierie et Sonar. `weapons.rs` possède les tubes, autorisations, solutions calculées exclusivement depuis les estimations partagées et courses de torpilles. `world.rs` applique les collisions, l'intégrité et les manœuvres privées du convoi. `WeaponsConfig` centralise les paramètres d'équilibrage transmis avec la mission.
+**Existant :** navigation nautique inertielle, plongée et ballasts, propulsion diesel-électrique, batterie, oxygène, signature acoustique, alertes de seuil, convoi déterministe, détection passive/active, pistes incertaines et automatisation minimale des bots Ingénierie et Sonar. `weapons.rs` possède les tubes, autorisations, solutions calculées exclusivement depuis les estimations sonar partagées ou visuelles appliquées par le Capitaine, et courses de torpilles. `world.rs` applique les collisions, l'intégrité et les manœuvres privées du convoi. `WeaponsConfig` centralise les paramètres d'équilibrage transmis avec la mission.
 
 Les mesures d'armement sont projetées uniquement vers le Capitaine et l'Armement. Les événements d'explosion observée et de fin de course estimée sont limités au Capitaine, à l'Armement et au Sonar. Une collision hors portée d'écoute ne raccourcit pas la course estimée envoyée au client : son résultat réel ne traverse pas la frontière réseau. L'intégrité, l'identité et la position réelle des navires restent dans le monde privé.
 
@@ -254,7 +254,7 @@ Le client peut prédire un retour d'interface, mais ne prédit pas les contacts,
 
 Les frontières de crates sont conservées : `simulation/src/periscope.rs` calcule les conditions d'utilisation, la visibilité et les observations visuelles ; `shared/src/periscope.rs` porte les types sérialisables et la configuration ; `server/src/game_room.rs` valide les permissions Capitaine et projette les seules données observables ; `client/src/periscope_ui.rs` affiche une vue à silhouettes 2D et soumet des intentions. Aucune dépendance n'a été ajoutée dans la simulation.
 
-Une silhouette est dessinée depuis un relèvement, des dimensions angulaires et un profil apparent, sans transmettre l'entité ennemie complète, son identité interne ou ses coordonnées exactes. Seuls les navires à flot, dans le champ et la portée autorisés sont projetés. Les jetons d'observation changent après perte de visibilité ; un lien vers un contact propre ne subsiste que pendant l'observation ininterrompue. Les contacts visuels sont séparés des pistes sonar et des entrées de conduite de tir.
+Une silhouette est dessinée depuis un relèvement, des dimensions angulaires et un profil apparent, sans transmettre l'entité ennemie complète, son identité interne ou ses coordonnées exactes. Seuls les navires à flot, dans le champ et la portée autorisés sont projetés. Les jetons d'observation changent après perte de visibilité ; un lien vers un contact propre ne subsiste que pendant l'observation ininterrompue. Les contacts visuels restent séparés des pistes sonar ; depuis P3, une désignation explicite avec hypothèses manuelles permet une conduite de tir visuelle indépendante.
 
 La mémoire est bornée à 64 contacts. Le relèvement et l'heure sont actualisés uniquement à vue, puis figés à la perte ; l'âge utilise le temps simulé, avec état ancien à 30 s et expiration à 120 s. Le partage explicite vers Sonar/Armement porte un identifiant neutre, le dernier relèvement, l'heure et la description visuelle ; Pilote et Ingénierie ne reçoivent pas ces contacts. Il n'y a ni réassociation cachée après perte, ni fusion manuelle, ni conversion en piste de tir en P1.
 
@@ -265,6 +265,17 @@ Le lobby refuse un démarrage solo sans Capitaine humain (`SoloCaptainRequired`)
 P2 ajoute `visual_detection.rs` : chaque `Vessel` possède une vigie privée avec acquisition progressive normalisée. `Simulation` applique les limites et l'abaissement automatique avant `World::observe_periscope`, puis le monde fait avancer la piste et les décisions de l'escorte. Les cargos transmettent immédiatement leurs observations bruitées, même si l'escorte est hors portée visuelle ; un bâtiment coulé ne produit aucune observation. Hors visibilité, seule l'acquisition inachevée décroît, sans accès aux déplacements cachés. Une acquisition complète produit une `enemy_ai::Observation` ; l'IA ne reçoit ni l'état réel ni l'état d'exposition du périscope. Les mécanismes acoustiques restent inchangés.
 
 Le protocole v11, incompatible v10, ajoute `EscortConfig::visual` (`PeriscopeDetectionConfig`, profils `LookoutConfig`). Les mesures, commandes, permissions et projections client restent inchangées : ni progression d'acquisition, ni piste privée, ni confirmation de détection ne sortent du serveur. Les paramètres non finis ou invalides désactivent la vigie concernée ; les états privés d'acquisition ne sont pas sérialisés. Voir la [roadmap](roadmap.md) et les recettes [P1](recette-p1.md) / [P2](recette-p2.md).
+
+
+### 5.7 Conduite de tir visuelle P3
+
+Le protocole v12, incompatible v11, remplace la cible des réglages de tir par `ShotTarget::Sonar(TrackId)` ou `ShotTarget::Visual(revision)`. `DesignateVisualTarget` est réservé au Capitaine et transporte seulement l'identifiant du contact et ses hypothèses de distance/cap/vitesse. `Simulation` retrouve le dernier relèvement, l'heure et la position propre conservés par `periscope.rs` ; ces données proviennent de l'observation et non de l'entité ennemie cachée.
+
+`weapons.rs` conserve une seule `VisualTargetEstimate` appliquée et un compteur de révisions. Le calcul extrapole le mouvement supposé depuis l'observation datée avant de résoudre l'interception ; il ne reçoit aucune identité ennemie. La même source alimente configuration, projections, autorisation et lancement, y compris pour le bot. `FiringSolution::uncertainty_meters` est optionnel : `None` signifie précision inconnue pour les hypothèses visuelles, sans valeur numérique artificielle.
+
+Chaque nouvelle désignation révoque les autorisations des tubes visuels et rend leurs anciennes révisions inutilisables jusqu'à reconfiguration. Les réglages sonar restent indépendants. Une désignation appliquée persiste après expiration du contact, avec un âge croissant et sans réassociation ; une nouvelle application exige un contact encore présent. La mémoire des positions propres d'observation est bornée par les 64 contacts du périscope.
+
+`WeaponsMeasurements` expose la désignation et son âge uniquement au Capitaine et à l'Armement. Le Sonar conserve le partage informatif P1, sans accéder aux estimations de tir. Les fixtures v12 couvrent désignation, configuration, ordre bot et sérialisation des mesures. Voir la [recette P3](recette-p3.md).
 
 ## 6. Vue d'exécution
 

@@ -17,6 +17,9 @@ struct PeriscopeUi {
     raise_attempted: bool,
     drag_origin: f32,
     pilot: PilotOrder,
+    distance: f32,
+    target_heading: f32,
+    target_speed: f32,
 }
 impl Default for PeriscopeUi {
     fn default() -> Self {
@@ -27,6 +30,9 @@ impl Default for PeriscopeUi {
             pending_contact: None,
             raise_attempted: false,
             drag_origin: 0.0,
+            distance: 1000.0,
+            target_heading: 90.0,
+            target_speed: 8.0,
             pilot: PilotOrder {
                 heading: 0.0,
                 speed: 2.0,
@@ -49,6 +55,11 @@ enum Action {
     PilotSpeed(f32),
     PilotDepth(f32),
     OrderPilot,
+    Distance(f32),
+    TargetHeading(f32),
+    TargetSpeed(f32),
+    ApplyEstimate,
+    OrderVisual,
 }
 
 const CLICK_FLASH_SECONDS: f64 = 0.15;
@@ -76,6 +87,8 @@ struct Status;
 struct ContactStatus;
 #[derive(Component)]
 struct PilotStatus;
+#[derive(Component)]
+struct EstimateStatus;
 #[derive(Component)]
 pub(crate) struct View;
 #[derive(Component)]
@@ -107,6 +120,7 @@ impl Plugin for PeriscopeUiPlugin {
                     buttons,
                     update,
                     update_shared_contacts,
+                    update_estimate_status,
                     update_button_feedback,
                 )
                     .chain()
@@ -422,6 +436,45 @@ fn spawn(mut commands: Commands) {
                 },
                 TextColor(Color::WHITE),
             ));
+            root.spawn((
+                EstimateStatus,
+                Text::new("ESTIMATIONS MANUELLES"),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+            for actions in [
+                vec![
+                    (Action::Distance(-100.0), "DIST -100m"),
+                    (Action::Distance(100.0), "DIST +100m"),
+                ],
+                vec![
+                    (Action::TargetHeading(-5.0), "CAP CIBLE -5"),
+                    (Action::TargetHeading(5.0), "CAP CIBLE +5"),
+                ],
+                vec![
+                    (Action::TargetSpeed(-1.0), "VIT -1kn"),
+                    (Action::TargetSpeed(1.0), "VIT +1kn"),
+                ],
+                vec![
+                    (Action::ApplyEstimate, "APPLIQUER ESTIMATION"),
+                    (Action::OrderVisual, "PREPARER BOT"),
+                ],
+            ] {
+                root.spawn(Node {
+                    width: percent(100),
+                    column_gap: px(4),
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (action, text) in actions {
+                        button(row, action, text);
+                    }
+                });
+            }
             for actions in [
                 vec![
                     (Action::PilotHeading(-10.0), "CAP -10"),
@@ -533,6 +586,30 @@ fn buttons(
                 ui.pilot.depth = (ui.pilot.depth + delta).clamp(0.0, 250.0)
             }
             Action::OrderPilot => queue.order_pilot(ui.pilot),
+            Action::Distance(delta) => ui.distance = (ui.distance + delta).clamp(100.0, 30_000.0),
+            Action::TargetHeading(delta) => {
+                ui.target_heading = (ui.target_heading + delta).rem_euclid(360.0)
+            }
+            Action::TargetSpeed(delta) => {
+                ui.target_speed = (ui.target_speed + delta).clamp(0.0, 40.0)
+            }
+            Action::ApplyEstimate => {
+                if let Some(contact) = ui.selected_contact {
+                    queue.push(PlayerCommand::DesignateVisualTarget {
+                        contact,
+                        distance: ui.distance,
+                        heading: ui.target_heading,
+                        speed: ui.target_speed,
+                    });
+                }
+            }
+            Action::OrderVisual => {
+                if let Some(v) = state.weapons.as_ref().and_then(|w| w.visual_target) {
+                    queue.push(PlayerCommand::OrderWeaponsBot {
+                        target: shared::ShotTarget::Visual(v.revision),
+                    });
+                }
+            }
         }
     }
 }
@@ -586,6 +663,45 @@ fn action_available(
         Action::PilotSpeed(delta) => (ui.pilot.speed + delta).clamp(0.0, 18.0) != ui.pilot.speed,
         Action::PilotDepth(delta) => (ui.pilot.depth + delta).clamp(0.0, 250.0) != ui.pilot.depth,
         Action::PilotHeading(_) | Action::Left | Action::Right => true,
+        Action::Distance(delta) => (ui.distance + delta).clamp(100.0, 30_000.0) != ui.distance,
+        Action::TargetSpeed(delta) => (ui.target_speed + delta).clamp(0.0, 40.0) != ui.target_speed,
+        Action::TargetHeading(_) => true,
+        Action::ApplyEstimate => state
+            .visual_contacts
+            .iter()
+            .any(|c| Some(c.id) == ui.selected_contact),
+        Action::OrderVisual => {
+            state
+                .weapons
+                .as_ref()
+                .and_then(|w| w.visual_target)
+                .is_some_and(|v| {
+                    Some(v.contact) == ui.selected_contact
+                        && v.distance == ui.distance
+                        && v.heading == ui.target_heading
+                        && v.speed == ui.target_speed
+                })
+                && state.lobby.as_ref().is_some_and(|l| {
+                    l.slots.iter().any(|s| {
+                        s.role == CrewRole::Weapons && s.occupant == shared::RoleOccupant::Bot
+                    })
+                })
+        }
+    }
+}
+
+fn update_estimate_status(
+    ui: Res<PeriscopeUi>,
+    state: Res<GameState>,
+    mut texts: Query<&mut Text, With<EstimateStatus>>,
+) {
+    for mut text in &mut texts {
+        let applied = state.weapons.as_ref().and_then(|w| w.visual_target.map(|v| (w, v)))
+            .map(|(w, v)| format!("APPLIQUE : visuel {} / r{} / {:.0}m / cap {:.0} / {:.1}kn\nRelevement {:.0} deg observe a {:.1}s / age {:.0}s",
+                v.contact.0, v.revision, v.distance, v.heading, v.speed, v.bearing, v.observed_at, w.visual_target_age))
+            .unwrap_or_else(|| "Aucune estimation appliquee".into());
+        text.0 = format!("ESTIMATIONS LOCALES (hypotheses, non mesurees)\nDistance {:.0}m / cap cible {:03.0} deg / vitesse {:.1}kn\nAPPLIQUER transmet le dernier relevement du contact et ces estimations.\n{}\nPREPARER BOT puis CARTE : choisir le tube configure et AUTORISER.\nToute nouvelle application invalide les anciens tirs visuels.",
+            ui.distance, ui.target_heading, ui.target_speed, applied);
     }
 }
 

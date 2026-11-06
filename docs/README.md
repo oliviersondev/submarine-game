@@ -10,7 +10,11 @@ Pour valider la riposte et les dégâts : **[Recette M5.2](recette-m5.2.md)**.
 
 Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.3.md)** (pompes, isolation, incendies, pannes et bot Ingénierie).
 
-## Dernier incrément — Périscope
+## Dernier incrément — Conduite de tir visuelle
+
+**P3 : attaque depuis des estimations visuelles manuelles** est implémenté avant M6. Le Capitaine sélectionne un contact au périscope, règle distance/cap/vitesse supposés et applique explicitement sa désignation. L'Armement humain ou bot prépare le tir sans piste sonar ; autorisation et procédure des tubes restent nécessaires. Voir la **[recette P3](recette-p3.md)**. La recette navigateur/téléphone et l'équilibrage restent à confirmer ; télémètre et estimation assistée sont différés.
+
+## Incréments périscope précédents
 
 M5 est clôturé par décision du porteur du projet. **P1 : observation et désignation visuelles au périscope** est implémenté avant la mission complète M6 : vue à silhouettes 2D, usage en mouvement à profondeur périscopique et contacts visuels autonomes partageables. Le joueur solo est obligatoirement Capitaine, les quatre autres postes étant des bots. Le partage visuel ne permet pas de préparer directement un tir. Voir la **[recette P1](recette-p1.md)** ; l'essai sur téléphone réel et l'équilibrage restent à confirmer.
 

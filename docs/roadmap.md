@@ -45,6 +45,7 @@ L'escorte possède une recherche acoustique privée, des pings actifs et un reto
 | M5 | une escorte cherche, attaque et provoque des avaries | critique |
 | P1 | le Capitaine observe au périscope et partage des contacts visuels autonomes | implémenté, recette tactile réelle à confirmer |
 | P2 | le périscope exposé peut être détecté par l'ennemi | implémenté, recette manuelle et équilibrage à confirmer |
+| P3 | attaquer depuis des estimations visuelles manuelles, sans sonar | implémenté, recette manuelle et équilibrage à confirmer |
 | M6 | une mission complète possède victoire, défaite et bilan | critique |
 | M7 | les cinq postes sont utilisables sur téléphone | élevée |
 | M8 | reconnexion, robustesse et déploiement de démonstration | élevée |
@@ -346,11 +347,28 @@ Les valeurs initiales sont des paramètres d'équilibrage centralisés dans `Per
 
 **Hors périmètre :** détection de la coque en surface périscope rentré (issue séparée), avions, météo, radio simulée, nouvelles réactions des cargos et nouvelles armes.
 
+### P3 — Conduite de tir visuelle manuelle
+
+**Statut :** implémenté le 6 novembre 2026, avant M6 ; recette navigateur/téléphone et équilibrage à confirmer.
+
+**Objectif joueur :** observer un navire au périscope, estimer sa distance, son cap et sa vitesse, puis faire préparer et lancer une torpille sans aucune piste sonar.
+
+- Sélection d'un contact visuel par le Capitaine ; réglages locaux tactiles de distance, cap et vitesse supposés, puis application explicite vers l'Armement.
+- Capture autoritaire du dernier relèvement observé, de son heure et de la position propre correspondante. Une observation perdue reste utilisable tant que le contact n'a pas expiré pour une nouvelle désignation.
+- Deux sources de tir explicites : piste sonar partagée ou révision d'estimation visuelle. Aucune association ni fusion automatique, aucun contrôle de la justesse des hypothèses.
+- La solution visuelle extrapole seulement les hypothèses depuis l'observation datée, même après perte de vue. La désignation appliquée persiste après expiration du contact, sans rafraîchissement caché ; son âge et sa précision inconnue sont affichés.
+- Une nouvelle application remplace la désignation visuelle précédente et invalide les autorisations des tubes visuels ; les tubes doivent être reconfigurés puis réautorisés. Les tirs sonar ne sont pas modifiés.
+- Bot Armement commandé explicitement, mêmes hypothèses et procédures que l'humain, attente de l'autorisation du Capitaine. Refus de l'ordre bot si l'Armement est humain.
+- Protocole v12 incompatible v11, données de conduite de tir uniquement pour Capitaine/Armement ; le partage informatif P1 reste distinct.
+- Tests de tir sans sonar, interception et raté depuis de mauvaises hypothèses, origine/heure de mesure, validation, autorisations, permissions, projections, fixtures et rejeu. Voir la [recette P3](recette-p3.md).
+
+**Hors périmètre :** télémètre, estimation assistée, association visuel/sonar, identification automatique, briefing et fin de mission M6, détection de la coque en surface périscope rentré.
+
 ## 10. M6 - Mission de référence complète
 
 **Objectif joueur :** jouer de bout en bout la mission définie dans le GDD.
 
-**Ordre retenu :** livrer d'abord P1. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. Limite de temps et autres causes de défaite restent à détailler lors du cadrage M6. P1 ne livre ni ces règles ni l'écran de fin.
+**Ordre retenu :** P1/P2 puis conduite de tir visuelle manuelle P3 avant M6. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. Limite de temps et autres causes de défaite restent à détailler lors du cadrage M6. P1/P2/P3 ne livrent ni ces règles ni l'écran de fin.
 
 ### Contenu
 

@@ -398,6 +398,20 @@ Le calcul traite les vitesses cible/torpille égales ou très proches par une é
 
 L'interface expose la confiance de piste, l'incertitude spatiale et les sources d'instabilité, sans pourcentage de réussite. Elle suit la course estimée des torpilles propres. Une explosion à moins de 6 000 m est observable, sans révéler la position, l'identité ou l'intégrité de la cible ; au-delà, la course estimée reste affichée jusqu'à épuisement prévu de l'autonomie.
 
+#### Conduite de tir visuelle manuelle (P3, implémenté le 6 novembre 2026)
+
+Une attaque peut désormais être préparée **sans aucune piste sonar**. Le partage informatif d'un contact P1 ne suffit pas : le Capitaine sélectionne un contact et applique explicitement une désignation avec ses hypothèses de distance (100 à 30 000 m), cap (0 inclus à 360° exclus) et vitesse (0 à 40 nœuds). Les commandes tactiles ajustent ces valeurs par pas de 100 m, 5° et 1 nœud. Les valeurs initiales du formulaire sont des hypothèses éditables, pas des mesures.
+
+Le serveur capture le dernier relèvement observé, son heure et la position du sous-marin à cette observation. Distance, cap et vitesse restent les estimations du joueur : aucune validation de leur justesse ni correction depuis le monde privé. Elles décrivent la cible à l'heure de l'observation. Le calcul extrapole ensuite un mouvement rectiligne uniforme et tient compte du déplacement propre, sans rafraîchir les paramètres depuis un navire caché. La précision est inconnue, sans pourcentage de réussite ni incertitude numérique fabriquée.
+
+La configuration d'un tube choisit une source distincte : piste sonar partagée ou révision d'estimation visuelle. Les corrections de cap/vitesse M4 s'appliquent aussi aux hypothèses visuelles. La procédure des tubes, la profondeur de tir, le secteur, l'autonomie, l'autorisation et la confirmation humaine restent inchangés. En solo, le bot Armement prépare sur ordre avec ces seules hypothèses et attend l'autorisation du Capitaine ; l'ordre bot est refusé lorsqu'un humain occupe l'Armement.
+
+La perte de vue ou l'abaissement du périscope n'interdit pas automatiquement le tir visuel : l'âge de l'observation est affiché et les hypothèses continuent d'être extrapolées. Après expiration du contact, une désignation déjà appliquée reste disponible, mais aucune nouvelle désignation ne peut utiliser ce contact expiré. Il n'y a aucune réassociation automatique après perte de vue.
+
+Les modifications du formulaire restent locales jusqu'à « APPLIQUER ESTIMATION ». Chaque application crée une nouvelle révision, remplace l'unique désignation visuelle appliquée et annule les autorisations des tubes visuels précédents. Leur reconfiguration puis une nouvelle autorisation sont obligatoires ; les tubes sonar ne sont pas affectés. Les mesures de conduite de tir sont réservées au Capitaine et à l'Armement, indépendamment du partage informatif P1 vers le Sonar.
+
+Télémètre, estimation assistée et association visuel/sonar sont différés. Voir la [recette P3](recette-p3.md).
+
 ### 6.8 Tubes et munitions
 
 Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torpilles prêtes ou en réserve. La séquence normale est :

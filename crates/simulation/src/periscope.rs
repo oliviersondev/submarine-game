@@ -18,6 +18,8 @@ pub(crate) struct Periscope {
     contacts: Vec<(Option<usize>, VisualContact)>,
     next_observation: u64,
     next_contact: u64,
+    origin: (f32, f32),
+    contact_origins: std::collections::HashMap<VisualContactId, (f32, f32)>,
 }
 
 impl Periscope {
@@ -35,6 +37,7 @@ impl Periscope {
     ) {
         let config = valid_config(config);
         self.elapsed += f64::from(dt);
+        self.origin = (submarine.x, submarine.y);
         self.blocked = if destroyed {
             Some(PeriscopeBlock::Destroyed)
         } else if !submarine.depth.is_finite()
@@ -103,6 +106,7 @@ impl Periscope {
                 contact.bearing = silhouette.bearing;
                 contact.kind = silhouette.kind;
                 contact.observed_at = self.elapsed;
+                self.contact_origins.insert(contact.id, self.origin);
             } else {
                 // Never reconnect a lost contact using its private vessel identity.
                 *vessel = None;
@@ -111,6 +115,8 @@ impl Periscope {
             contact.old = contact.age >= config.old_after;
         }
         self.contacts.retain(|(_, c)| c.age < config.expires_after);
+        self.contact_origins
+            .retain(|id, _| self.contacts.iter().any(|(_, c)| c.id == *id));
     }
 
     pub(crate) fn command(&mut self, command: PlayerCommand) -> Result<(), ProtocolError> {
@@ -143,6 +149,8 @@ impl Periscope {
                     return Err(ProtocolError::VisualContactLimitReached);
                 }
                 self.next_contact += 1;
+                self.contact_origins
+                    .insert(VisualContactId(self.next_contact), self.origin);
                 self.contacts.push((
                     Some(*index),
                     VisualContact {
@@ -198,6 +206,22 @@ impl Periscope {
             .filter(|(_, c)| !shared_only || c.shared)
             .map(|(_, c)| c.clone())
             .collect()
+    }
+
+    pub(crate) fn firing_observation(
+        &self,
+        id: VisualContactId,
+    ) -> Result<(VisualContact, (f32, f32)), ProtocolError> {
+        let contact = self
+            .contacts
+            .iter()
+            .find(|(_, c)| c.id == id)
+            .ok_or(ProtocolError::VisualContactNotFound)?;
+        let origin = self
+            .contact_origins
+            .get(&id)
+            .ok_or(ProtocolError::VisualContactNotFound)?;
+        Ok((contact.1.clone(), *origin))
     }
 }
 

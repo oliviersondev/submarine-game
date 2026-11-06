@@ -20,9 +20,53 @@ pub(crate) struct Weapons {
     next_id: u64,
     bot_tube: Option<u8>,
     bot_settings: Option<ShotSettings>,
+    visual_target: Option<shared::VisualTargetEstimate>,
+    visual_revision: u64,
+    elapsed: f64,
 }
 
 impl Weapons {
+    pub(crate) fn designate_visual(
+        &mut self,
+        contact: shared::VisualContact,
+        origin: (f32, f32),
+        distance: f32,
+        heading: f32,
+        speed: f32,
+    ) -> Result<(), ProtocolError> {
+        if !distance.is_finite()
+            || !(100.0..=30_000.0).contains(&distance)
+            || !heading.is_finite()
+            || !(0.0..360.0).contains(&heading)
+            || !speed.is_finite()
+            || !(0.0..=40.0).contains(&speed)
+        {
+            return Err(ProtocolError::InvalidVisualEstimate);
+        }
+        self.visual_revision += 1;
+        self.visual_target = Some(shared::VisualTargetEstimate {
+            revision: self.visual_revision,
+            contact: contact.id,
+            kind: contact.kind,
+            bearing: contact.bearing,
+            observed_at: contact.observed_at,
+            origin_x: origin.0,
+            origin_y: origin.1,
+            distance,
+            heading,
+            speed,
+        });
+        for tube in &mut self.tubes {
+            if tube
+                .settings
+                .is_some_and(|s| matches!(s.target, shared::ShotTarget::Visual(_)))
+            {
+                tube.authorized = false;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             tubes: (0..5)
@@ -49,11 +93,23 @@ impl Weapons {
             .tubes
             .iter()
             .map(|tube| {
-                tube.settings
-                    .map(|settings| solution(state, tracks, settings, config))
+                tube.settings.map(|settings| {
+                    resolve_solution(
+                        state,
+                        tracks,
+                        settings,
+                        config,
+                        self.visual_target,
+                        self.elapsed,
+                    )
+                })
             })
             .collect();
         WeaponsMeasurements {
+            visual_target: self.visual_target,
+            visual_target_age: self
+                .visual_target
+                .map_or(0.0, |v| (self.elapsed - v.observed_at).max(0.0) as f32),
             tubes: self.tubes.clone(),
             reserve: self.reserve,
             solution_errors: results
@@ -97,7 +153,14 @@ impl Weapons {
         use PlayerCommand::*;
         use TubePhase::*;
         if let OrderWeaponsBot { target } = command {
-            solution(state, tracks, ShotSettings::for_target(target), config)?;
+            resolve_solution(
+                state,
+                tracks,
+                ShotSettings::for_source(target),
+                config,
+                self.visual_target,
+                self.elapsed,
+            )?;
             // Un nouvel ordre remplace la consigne du tube deja pris en charge.
             // La configuration sera appliquee par la meme commande que pour un humain,
             // une fois la phase de chargement terminee.
@@ -111,7 +174,7 @@ impl Weapons {
                         .or_else(|| self.tubes.iter().position(|t| t.phase == Empty))
                 })
                 .ok_or(ProtocolError::InvalidTubePhase)?;
-            let settings = ShotSettings::for_target(target);
+            let settings = ShotSettings::for_source(target);
             if !self.tubes[index].loaded && !matches!(self.tubes[index].phase, Empty | Loading) {
                 return Err(ProtocolError::InvalidTubePhase);
             }
@@ -147,7 +210,14 @@ impl Weapons {
                 if tube.loaded && matches!(tube.phase, Loaded | Flooded | Ready) =>
             {
                 validate_settings(settings, config)?;
-                solution(state, tracks, settings, config)?;
+                resolve_solution(
+                    state,
+                    tracks,
+                    settings,
+                    config,
+                    self.visual_target,
+                    self.elapsed,
+                )?;
                 tube.settings = Some(settings);
                 tube.authorized = false;
             }
@@ -177,7 +247,14 @@ impl Weapons {
                     return Err(ProtocolError::InvalidTubePhase);
                 }
                 validate_settings(settings, config)?;
-                solution(state, tracks, settings, config)?;
+                resolve_solution(
+                    state,
+                    tracks,
+                    settings,
+                    config,
+                    self.visual_target,
+                    self.elapsed,
+                )?;
                 tube.authorized = true;
             }
             FireTorpedo { .. } if tube.phase == Ready && tube.loaded => {
@@ -188,7 +265,14 @@ impl Weapons {
                     return Err(ProtocolError::LaunchDepthExceeded);
                 }
                 let settings = tube.settings.ok_or(ProtocolError::InvalidShotSettings)?;
-                let shot = solution(state, tracks, settings, config)?;
+                let shot = resolve_solution(
+                    state,
+                    tracks,
+                    settings,
+                    config,
+                    self.visual_target,
+                    self.elapsed,
+                )?;
                 // Tubes avant et arrière : le bâtiment doit être positionné pour le tir.
                 let axis = (state.heading + if index == 4 { 180.0 } else { 0.0 }).rem_euclid(360.0);
                 if crate::shortest_angle(axis, shot.bearing).abs() > 90.0 {
@@ -232,7 +316,15 @@ impl Weapons {
         if captain_bot {
             for tube in &mut self.tubes {
                 if let Some(settings) = tube.settings {
-                    tube.authorized = solution(state, tracks, settings, config).is_ok();
+                    tube.authorized = resolve_solution(
+                        state,
+                        tracks,
+                        settings,
+                        config,
+                        self.visual_target,
+                        self.elapsed,
+                    )
+                    .is_ok();
                 }
             }
         }
@@ -244,7 +336,12 @@ impl Weapons {
         };
         let tube = &self.tubes[index as usize];
         let pending = self.bot_settings;
-        if pending.is_some_and(|settings| !tracks.iter().any(|track| track.id == settings.target)) {
+        if pending.is_some_and(|settings| match settings.target {
+            shared::ShotTarget::Sonar(id) => !tracks.iter().any(|track| track.id == id),
+            shared::ShotTarget::Visual(revision) => {
+                self.visual_target.is_none_or(|v| v.revision != revision)
+            }
+        }) {
             // Recuperer le tube apres la perte d'une piste au lieu de bloquer
             // indefiniment le bot. Une munition non tiree reste chargee.
             let cleanup = match tube.phase {
@@ -302,6 +399,7 @@ impl Weapons {
         config: WeaponsConfig,
         state: &SubmarineState,
     ) -> Vec<GameEvent> {
+        self.elapsed += f64::from(dt);
         for tube in &mut self.tubes {
             tube.remaining_seconds = (tube.remaining_seconds - dt).max(0.0);
             if tube.remaining_seconds == 0.0 {
@@ -407,11 +505,55 @@ pub(crate) fn solution(
     settings: ShotSettings,
     config: WeaponsConfig,
 ) -> Result<FiringSolution, ProtocolError> {
+    resolve_solution(state, tracks, settings, config, None, 0.0)
+}
+
+fn resolve_solution(
+    state: &SubmarineState,
+    tracks: &[TrackEstimate],
+    settings: ShotSettings,
+    config: WeaponsConfig,
+    visual: Option<shared::VisualTargetEstimate>,
+    elapsed: f64,
+) -> Result<FiringSolution, ProtocolError> {
     validate_settings(settings, config)?;
-    let track = tracks
-        .iter()
-        .find(|t| t.id == settings.target)
-        .ok_or(ProtocolError::TrackNotShared)?;
+    let estimated;
+    let mut visual_age = None;
+    let track = match settings.target {
+        shared::ShotTarget::Sonar(id) => tracks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or(ProtocolError::TrackNotShared)?,
+        shared::ShotTarget::Visual(revision) => {
+            let v = visual
+                .filter(|v| v.revision == revision)
+                .ok_or(ProtocolError::VisualEstimateSuperseded)?;
+            let age = (elapsed - v.observed_at).max(0.0) as f32;
+            visual_age = Some(age);
+            // Extrapolate only the player's hypotheses from the observation's own position.
+            let bearing = v.bearing.to_radians();
+            let heading = (v.heading + settings.heading_correction).to_radians();
+            let speed = (v.speed + settings.speed_correction).max(0.0) * KNOTS_TO_METERS_PER_SECOND;
+            let dx =
+                v.origin_x + bearing.sin() * v.distance + heading.sin() * speed * age - state.x;
+            let dy =
+                v.origin_y + bearing.cos() * v.distance + heading.cos() * speed * age - state.y;
+            estimated = TrackEstimate {
+                id: shared::TrackId(0),
+                bearing: dx.atan2(dy).to_degrees().rem_euclid(360.0),
+                bearing_uncertainty: 0.0,
+                distance: Some(dx.hypot(dy)),
+                distance_uncertainty: Some(0.0),
+                heading: Some(v.heading),
+                speed: Some(v.speed),
+                classification: shared::ContactClassification::Unknown,
+                confidence: 0.0,
+                last_observation_tick: 0,
+                shared: true,
+            };
+            &estimated
+        }
+    };
     if !track.shared {
         return Err(ProtocolError::TrackNotShared);
     }
@@ -460,7 +602,12 @@ pub(crate) fn solution(
         .to_degrees()
         .rem_euclid(360.0);
     let mut warnings = vec![];
-    if track.confidence < 70.0 {
+    if let Some(age) = visual_age {
+        warnings.push(format!(
+            "Estimation visuelle manuelle / observation agee de {age:.0}s / precision inconnue"
+        ));
+    }
+    if visual_age.is_none() && track.confidence < 70.0 {
         warnings.push("Piste peu fiable".into());
     }
     if track.distance_uncertainty.unwrap_or(distance) > 300.0 {
@@ -475,8 +622,10 @@ pub(crate) fn solution(
     Ok(FiringSolution {
         bearing,
         run_seconds: time,
-        uncertainty_meters: track.distance_uncertainty.unwrap_or(distance)
-            + distance * track.bearing_uncertainty.to_radians().sin().abs(),
+        uncertainty_meters: visual_age.is_none().then_some(
+            track.distance_uncertainty.unwrap_or(distance)
+                + distance * track.bearing_uncertainty.to_radians().sin().abs(),
+        ),
         warnings,
         launch_allowed: state.depth <= config.max_launch_depth,
     })
@@ -486,6 +635,208 @@ pub(crate) fn solution(
 mod tests {
     use super::*;
     use shared::{ContactClassification, TrackId};
+
+    fn visual_contact(observed_at: f64) -> shared::VisualContact {
+        shared::VisualContact {
+            id: shared::VisualContactId(1),
+            bearing: 0.0,
+            kind: shared::SilhouetteKind::SingleFunnelCargo,
+            observed_at,
+            age: 0.0,
+            old: false,
+            shared: false,
+        }
+    }
+
+    #[test]
+    fn visual_estimates_validate_before_mutation_and_revoke_old_authorizations() {
+        let (mut weapons, _, state, config, _) = ready();
+        weapons
+            .designate_visual(
+                visual_contact(weapons.elapsed),
+                (0.0, 0.0),
+                1000.0,
+                90.0,
+                8.0,
+            )
+            .unwrap();
+        let settings = ShotSettings::for_source(shared::ShotTarget::Visual(1));
+        for command in [
+            PlayerCommand::ConfigureShot { tube: 0, settings },
+            PlayerCommand::AuthorizeShot { tube: 0, settings },
+        ] {
+            weapons.apply(command, &state, &[], config).unwrap();
+        }
+        let before = weapons.measurements(&state, &[], config);
+        assert!(before.tubes[0].authorized);
+        assert_eq!(
+            before.solutions[0].as_ref().unwrap().uncertainty_meters,
+            None
+        );
+        for (distance, heading, speed) in [
+            (f32::NAN, 90.0, 8.0),
+            (99.0, 90.0, 8.0),
+            (30_001.0, 90.0, 8.0),
+            (1000.0, f32::INFINITY, 8.0),
+            (1000.0, 360.0, 8.0),
+            (1000.0, 90.0, -1.0),
+            (1000.0, 90.0, 40.1),
+            (1000.0, 90.0, f32::NAN),
+        ] {
+            assert_eq!(
+                weapons.designate_visual(
+                    visual_contact(weapons.elapsed),
+                    (0.0, 0.0),
+                    distance,
+                    heading,
+                    speed
+                ),
+                Err(ProtocolError::InvalidVisualEstimate)
+            );
+            assert_eq!(weapons.measurements(&state, &[], config), before);
+        }
+        weapons.tubes[1].settings = Some(ShotSettings::for_target(TrackId(42)));
+        weapons.tubes[1].authorized = true;
+        weapons
+            .designate_visual(
+                visual_contact(weapons.elapsed),
+                (0.0, 0.0),
+                1200.0,
+                90.0,
+                8.0,
+            )
+            .unwrap();
+        assert!(weapons.tubes[1].authorized);
+        assert!(!weapons.tubes[0].authorized);
+        assert_eq!(weapons.tubes[0].settings, Some(settings));
+        assert_eq!(
+            weapons.apply(
+                PlayerCommand::AuthorizeShot { tube: 0, settings },
+                &state,
+                &[],
+                config
+            ),
+            Err(ProtocolError::VisualEstimateSuperseded)
+        );
+        assert_eq!(
+            weapons.apply(PlayerCommand::FireTorpedo { tube: 0 }, &state, &[], config),
+            Err(ProtocolError::ShotNotAuthorized)
+        );
+        let new = ShotSettings::for_source(shared::ShotTarget::Visual(2));
+        weapons
+            .apply(
+                PlayerCommand::ConfigureShot {
+                    tube: 0,
+                    settings: new,
+                },
+                &state,
+                &[],
+                config,
+            )
+            .unwrap();
+        weapons
+            .apply(
+                PlayerCommand::AuthorizeShot {
+                    tube: 0,
+                    settings: new,
+                },
+                &state,
+                &[],
+                config,
+            )
+            .unwrap();
+        weapons
+            .apply(PlayerCommand::FireTorpedo { tube: 0 }, &state, &[], config)
+            .unwrap();
+    }
+
+    #[test]
+    fn visual_interception_projects_from_observed_origin_and_time_not_current_bearing() {
+        let mut weapons = Weapons::new();
+        let mut state = SubmarineState::default();
+        let config = WeaponsConfig::default();
+        weapons
+            .designate_visual(visual_contact(0.0), (100.0, 200.0), 1000.0, 90.0, 8.0)
+            .unwrap();
+        weapons.elapsed = 60.0;
+        state.x = -300.0;
+        state.y = 500.0;
+        let settings = ShotSettings::for_source(shared::ShotTarget::Visual(1));
+        let result = resolve_solution(
+            &state,
+            &[],
+            settings,
+            config,
+            weapons.visual_target,
+            weapons.elapsed,
+        )
+        .unwrap();
+        let dx = 400.0 + 8.0 * KNOTS_TO_METERS_PER_SECOND * 60.0;
+        let dy = 700.0;
+        let mut expected = track();
+        expected.bearing = dx.atan2(dy).to_degrees();
+        expected.distance = Some(dx.hypot(dy));
+        let reference = solution(
+            &state,
+            &[expected],
+            ShotSettings::for_target(TrackId(42)),
+            config,
+        )
+        .unwrap();
+        assert!((result.bearing - reference.bearing).abs() < 0.001);
+        assert!((result.run_seconds - reference.run_seconds).abs() < 0.001);
+        assert!(result.warnings.iter().any(|w| w.contains("60s")));
+    }
+
+    fn visual_attack(estimated_speed: f32) -> (Vec<GameEvent>, World) {
+        let (mut weapons, mut world, state, config, _) = ready();
+        world.vessels[0].x = 0.0;
+        world.vessels[0].y = 1000.0;
+        world.vessels[0].heading = 90.0;
+        world.vessels[0].speed = 8.0;
+        world.vessels[1].x = 6000.0;
+        world.vessels[2].x = -6000.0;
+        weapons
+            .designate_visual(
+                visual_contact(weapons.elapsed),
+                (0.0, 0.0),
+                1000.0,
+                90.0,
+                estimated_speed,
+            )
+            .unwrap();
+        let settings = ShotSettings::for_source(shared::ShotTarget::Visual(1));
+        for command in [
+            PlayerCommand::ConfigureShot { tube: 0, settings },
+            PlayerCommand::AuthorizeShot { tube: 0, settings },
+            PlayerCommand::FireTorpedo { tube: 0 },
+        ] {
+            weapons.apply(command, &state, &[], config).unwrap();
+        }
+        let mut events = vec![];
+        for _ in 0..9000 {
+            world.update(0.05, &state, 0, shared::EscortConfig::default());
+            events.extend(weapons.update(0.05, &mut world, config, &state));
+        }
+        (events, world)
+    }
+
+    #[test]
+    fn visual_attack_hits_from_correct_hypotheses_and_misses_from_wrong_speed() {
+        let (events, world) = visual_attack(8.0);
+        assert!(!world.vessels[0].afloat());
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, GameEvent::TorpedoImpact { .. })));
+        let (events, world) = visual_attack(0.0);
+        assert!(world.vessels[0].afloat());
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, GameEvent::TorpedoImpact { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, GameEvent::TorpedoExpired { .. })));
+    }
 
     fn track() -> TrackEstimate {
         TrackEstimate {
@@ -764,7 +1115,7 @@ mod tests {
         weapons
             .apply(
                 PlayerCommand::OrderWeaponsBot {
-                    target: TrackId(42),
+                    target: shared::ShotTarget::Sonar(TrackId(42)),
                 },
                 &state,
                 &tracks,
@@ -1015,7 +1366,9 @@ mod tests {
         for target in [TrackId(42), TrackId(43)] {
             weapons
                 .apply(
-                    PlayerCommand::OrderWeaponsBot { target },
+                    PlayerCommand::OrderWeaponsBot {
+                        target: shared::ShotTarget::Sonar(target),
+                    },
                     &state,
                     &tracks,
                     config,
@@ -1033,7 +1386,10 @@ mod tests {
             weapons.update(1.0, &mut world, config, &state);
             events.extend(weapons.automate(&state, &tracks, config, true, false));
         }
-        assert_eq!(weapons.tubes[0].settings.unwrap().target, TrackId(43));
+        assert_eq!(
+            weapons.tubes[0].settings.unwrap().target,
+            shared::ShotTarget::Sonar(TrackId(43))
+        );
         assert_eq!(weapons.tubes[0].phase, TubePhase::Ready);
         assert!(events.is_empty());
         let settings = weapons.tubes[0].settings.unwrap();
@@ -1067,7 +1423,7 @@ mod tests {
         weapons
             .apply(
                 PlayerCommand::OrderWeaponsBot {
-                    target: TrackId(42),
+                    target: shared::ShotTarget::Sonar(TrackId(42)),
                 },
                 &state,
                 &tracks,
@@ -1094,7 +1450,7 @@ mod tests {
         weapons
             .apply(
                 PlayerCommand::OrderWeaponsBot {
-                    target: TrackId(43),
+                    target: shared::ShotTarget::Sonar(TrackId(43)),
                 },
                 &state,
                 &new_tracks,
@@ -1102,7 +1458,10 @@ mod tests {
             )
             .unwrap();
         weapons.automate(&state, &new_tracks, config, true, false);
-        assert_eq!(weapons.tubes[0].settings.unwrap().target, TrackId(43));
+        assert_eq!(
+            weapons.tubes[0].settings.unwrap().target,
+            shared::ShotTarget::Sonar(TrackId(43))
+        );
         assert_eq!(weapons.reserve, 4);
     }
 

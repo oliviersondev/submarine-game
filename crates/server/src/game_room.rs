@@ -164,6 +164,7 @@ fn command_allowed_for_role(role: CrewRole, command: &PlayerCommand) -> bool {
                 | PlayerCommand::SetPeriscopeBearing(_)
                 | PlayerCommand::CreateVisualContact { .. }
                 | PlayerCommand::ShareVisualContact(_)
+                | PlayerCommand::DesignateVisualTarget { .. }
         )
     )
 }
@@ -301,6 +302,65 @@ mod tests {
             command_id: CommandId(7),
             action,
         }
+    }
+
+    #[test]
+    fn visual_designation_is_captain_only_and_projected_only_to_fire_control() {
+        let command = PlayerCommand::DesignateVisualTarget {
+            contact: shared::VisualContactId(1),
+            distance: 1000.0,
+            heading: 90.0,
+            speed: 8.0,
+        };
+        for role in CrewRole::ALL {
+            assert_eq!(
+                command_allowed_for_role(role, &command),
+                role == CrewRole::Captain
+            );
+        }
+        let mut sim = Simulation::new();
+        sim.apply_command(PlayerCommand::SetPeriscopeRaised(true))
+            .unwrap();
+        let observation_id = sim.periscope_measurements().silhouettes[0].observation_id;
+        sim.apply_command(PlayerCommand::CreateVisualContact { observation_id })
+            .unwrap();
+        sim.apply_command(command.clone()).unwrap();
+        for role in CrewRole::ALL {
+            let view = project_mission(&sim, role);
+            if matches!(role, CrewRole::Captain | CrewRole::Weapons) {
+                let weapons = view.weapons.unwrap();
+                let visual = weapons.visual_target.unwrap();
+                assert_eq!(visual.distance, 1000.0);
+                assert_eq!(
+                    (visual.origin_x, visual.origin_y),
+                    (sim.state.x, sim.state.y)
+                );
+            } else {
+                assert!(view.weapons.is_none());
+            }
+        }
+        let (tx, mut rx) = mpsc::channel(2);
+        let (other, mut other_rx) = mpsc::channel(2);
+        let players = HashMap::from([
+            (PlayerId(1), (CrewRole::Weapons, tx)),
+            (PlayerId(2), (CrewRole::Captain, other)),
+        ]);
+        let before = sim.weapons_measurements();
+        handle_command(
+            &mut sim,
+            &players,
+            &HashSet::from([CrewRole::Weapons, CrewRole::Captain]),
+            request(CrewRole::Weapons, GameRoomAction::Player(command)),
+        );
+        assert_eq!(sim.weapons_measurements(), before);
+        assert!(matches!(
+            rx.try_recv().unwrap().payload,
+            ServerPayload::Error {
+                error: ProtocolError::CommandNotAllowedForRole,
+                ..
+            }
+        ));
+        assert!(other_rx.try_recv().is_err());
     }
 
     #[test]
@@ -622,7 +682,7 @@ mod tests {
             request(
                 CrewRole::Captain,
                 GameRoomAction::Player(PlayerCommand::OrderWeaponsBot {
-                    target: shared::TrackId(1),
+                    target: shared::ShotTarget::Sonar(shared::TrackId(1)),
                 }),
             ),
         );
