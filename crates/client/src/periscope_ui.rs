@@ -9,8 +9,8 @@ use crate::{
 };
 
 #[derive(Resource)]
-struct PeriscopeUi {
-    open: bool,
+pub(crate) struct PeriscopeUi {
+    pub(crate) open: bool,
     selected_observation: Option<u64>,
     selected_contact: Option<VisualContactId>,
     pending_contact: Option<u64>,
@@ -112,6 +112,7 @@ pub struct PeriscopeUiPlugin;
 impl Plugin for PeriscopeUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::periscope_graticule::PeriscopeGraticulePlugin)
+            .add_plugins(crate::periscope_effects::PeriscopeEffectsPlugin)
             .init_resource::<PeriscopeUi>()
             .add_systems(Startup, spawn)
             .add_systems(
@@ -267,6 +268,7 @@ fn spawn(mut commands: Commands) {
                 },
             )
             .with_children(|view| {
+                crate::periscope_effects::spawn(view);
                 view.spawn((
                     ClosedViewMessage,
                     Visibility::Hidden,

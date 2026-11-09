@@ -539,6 +539,10 @@ pub struct FiringSolution {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TorpedoMeasurements {
     pub id: u64,
+    pub launch_x: f32,
+    pub launch_y: f32,
+    pub elapsed_seconds: f32,
+    pub estimated_intercept_seconds: f32,
     pub x: f32,
     pub y: f32,
     pub depth: f32,

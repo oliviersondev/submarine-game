@@ -10,7 +10,11 @@ Pour valider la riposte et les dégâts : **[Recette M5.2](recette-m5.2.md)**.
 
 Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.3.md)** (pompes, isolation, incendies, pannes et bot Ingénierie).
 
-## Dernier incrément — Conduite de tir visuelle
+## Dernier incrément — Courses de torpilles et explosions
+
+**P4 : visualisation des courses estimées et perception des explosions** est implémenté : pointillés et interception supposée du tube sélectionné sur la carte, torpilles estimées avec traînée, temps/autonomie, son désactivable des explosions entendues et gerbes temporaires au périscope. Aucun impact caché ni navire détruit n'est confirmé gratuitement. Voir la **[recette P4](recette-p4.md)** ; le rendu navigateur/téléphone et l'audio réel restent à valider.
+
+## Conduite de tir visuelle
 
 **P3 : attaque depuis des estimations visuelles manuelles** est implémenté avant M6. Le Capitaine sélectionne un contact au périscope, règle distance/cap/vitesse supposés et applique explicitement sa désignation. L'Armement humain ou bot prépare le tir sans piste sonar ; autorisation et procédure des tubes restent nécessaires. Voir la **[recette P3](recette-p3.md)**. La recette navigateur/téléphone et l'équilibrage restent à confirmer ; télémètre et estimation assistée sont différés.
 

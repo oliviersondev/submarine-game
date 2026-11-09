@@ -23,6 +23,8 @@ pub(crate) struct Weapons {
     visual_target: Option<shared::VisualTargetEstimate>,
     visual_revision: u64,
     elapsed: f64,
+    /// Private impact positions drained by the visual observer in the same tick.
+    impacts: Vec<(f32, f32)>,
 }
 
 impl Weapons {
@@ -282,6 +284,10 @@ impl Weapons {
                 self.torpedoes.push(RunningTorpedo {
                     measurement: TorpedoMeasurements {
                         id: self.next_id,
+                        launch_x: state.x,
+                        launch_y: state.y,
+                        elapsed_seconds: 0.0,
+                        estimated_intercept_seconds: shot.run_seconds,
                         x: state.x,
                         y: state.y,
                         depth: state.depth,
@@ -400,6 +406,7 @@ impl Weapons {
         state: &SubmarineState,
     ) -> Vec<GameEvent> {
         self.elapsed += f64::from(dt);
+        self.impacts.clear();
         for tube in &mut self.tubes {
             tube.remaining_seconds = (tube.remaining_seconds - dt).max(0.0);
             if tube.remaining_seconds == 0.0 {
@@ -420,6 +427,7 @@ impl Weapons {
         let mut events = vec![];
         self.torpedoes.retain_mut(|run| {
             let torpedo = &mut run.measurement;
+            torpedo.elapsed_seconds += dt;
             let distance = (config.torpedo_speed_knots * KNOTS_TO_METERS_PER_SECOND * dt)
                 .min(torpedo.remaining_meters);
             let angle = torpedo.bearing.to_radians();
@@ -434,6 +442,7 @@ impl Weapons {
                     .is_some()
             {
                 run.active = false;
+                self.impacts.push((torpedo.x, torpedo.y));
                 if (torpedo.x - state.x).hypot(torpedo.y - state.y) <= 6000.0 {
                     events.push(GameEvent::ExplosionHeard);
                     events.push(GameEvent::TorpedoImpact {
@@ -452,6 +461,10 @@ impl Weapons {
             true
         });
         events
+    }
+
+    pub(crate) fn take_impacts(&mut self) -> Vec<(f32, f32)> {
+        std::mem::take(&mut self.impacts)
     }
 
     pub(crate) fn procedure_noise(&self) -> f32 {

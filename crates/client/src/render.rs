@@ -1485,6 +1485,9 @@ fn spawn_polar_map(parent: &mut ChildSpawnerCommands, tactical: bool) {
             BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.55)),
         ))
         .with_children(|map| {
+            if tactical {
+                crate::torpedo_ui::spawn(map);
+            }
             for (label, left, top) in [
                 ("N 000", 43.0, 1.0),
                 ("E 090", 81.0, 45.0),
@@ -2193,7 +2196,7 @@ fn polar_position(track: &TrackEstimate) -> (f32, f32) {
     let angle = track.bearing.rem_euclid(360.0).to_radians();
     let radius = track
         .distance
-        .map(|distance| (distance / 10_000.0).clamp(0.16, 1.0))
+        .map(|distance| (distance / 10_000.0).clamp(0.0, 1.0))
         .unwrap_or(0.72)
         * 40.0;
     (50.0 + angle.sin() * radius, 50.0 - angle.cos() * radius)

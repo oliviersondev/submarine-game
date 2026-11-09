@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 shared = { path = "../shared" }
-bevy = { version = "0.19", features = ["webgl2"] }
+bevy = { version = "0.19", features = ["webgl2", "wav"] }
 ewebsock = "0.6"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

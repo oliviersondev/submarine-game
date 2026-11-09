@@ -46,6 +46,7 @@ L'escorte possède une recherche acoustique privée, des pings actifs et un reto
 | P1 | le Capitaine observe au périscope et partage des contacts visuels autonomes | implémenté, recette tactile réelle à confirmer |
 | P2 | le périscope exposé peut être détecté par l'ennemi | implémenté, recette manuelle et équilibrage à confirmer |
 | P3 | attaquer depuis des estimations visuelles manuelles, sans sonar | implémenté, recette manuelle et équilibrage à confirmer |
+| P4 | suivre les courses estimées, entendre les explosions et voir les gerbes au périscope | implémenté, recette navigateur/téléphone et audio à confirmer |
 | M6 | une mission complète possède victoire, défaite et bilan | critique |
 | M7 | les cinq postes sont utilisables sur téléphone | élevée |
 | M8 | reconnexion, robustesse et déploiement de démonstration | élevée |
@@ -364,11 +365,22 @@ Les valeurs initiales sont des paramètres d'équilibrage centralisés dans `Per
 
 **Hors périmètre :** télémètre, estimation assistée, association visuel/sonar, identification automatique, briefing et fin de mission M6, détection de la coque en surface périscope rentré.
 
+### P4 — Courses estimées et perception des explosions
+
+**Statut :** implémenté le 9 novembre 2026, avant M6 ; recette navigateur/téléphone et audio réel à confirmer.
+
+- Carte Capitaine/Armement : pointillés du tube configuré sélectionné et interception supposée, symboles des torpilles propres avec traînée et affichage des délais/autonomies estimés.
+- Son sourd non directionnel sur les seules explosions entendues, bouton muet et maintien du bandeau/historique. Regroupement audio borné pour éviter la saturation.
+- Gerbes temporaires au périscope sur les seuls impacts observables au moment de l'explosion ; plusieurs gerbes simultanées possibles, sans rejeu après abaissement ou fermeture de la vue.
+- Protocole v13 incompatible v12 : origine/temps de course propres et observation visuelle minimale réservée au Capitaine, sans position ennemie ni résultat de naufrage.
+- Tests de limites de visibilité, filtrage par rôle, impact hors écoute vu/non vu, absence de révélation rétroactive, sérialisation et non-régression des courses simultanées. Géométrie, génération audio et effets transitoires couverts par des tests client compilables en WASM.
+- Voir la [recette P4](recette-p4.md). Télémètre, estimation assistée, nouvelle règle de détection et bilan M6 restent hors périmètre.
+
 ## 10. M6 - Mission de référence complète
 
 **Objectif joueur :** jouer de bout en bout la mission définie dans le GDD.
 
-**Ordre retenu :** P1/P2 puis conduite de tir visuelle manuelle P3 avant M6. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. Limite de temps et autres causes de défaite restent à détailler lors du cadrage M6. P1/P2/P3 ne livrent ni ces règles ni l'écran de fin.
+**Ordre retenu :** P1/P2, conduite de tir visuelle manuelle P3 et retours de tir P4 avant M6. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. Limite de temps et autres causes de défaite restent à détailler lors du cadrage M6. P1/P2/P3/P4 ne livrent ni ces règles ni l'écran de fin.
 
 ### Contenu
 

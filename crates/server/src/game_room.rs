@@ -188,6 +188,16 @@ fn broadcast(
         if matches!(
             &message.payload,
             ServerPayload::Event {
+                event: shared::GameEvent::SurfaceExplosionObserved { .. },
+                ..
+            }
+        ) && *role != CrewRole::Captain
+        {
+            continue;
+        }
+        if matches!(
+            &message.payload,
+            ServerPayload::Event {
                 event: shared::GameEvent::SonarPingHeard { .. },
                 ..
             }
@@ -294,6 +304,30 @@ fn project_submarine(sim: &Simulation, role: CrewRole) -> SubmarineSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visual_explosions_are_only_broadcast_to_the_captain() {
+        let mut players = HashMap::new();
+        let mut receivers = vec![];
+        for (index, role) in CrewRole::ALL.into_iter().enumerate() {
+            let (tx, rx) = mpsc::channel(2);
+            players.insert(PlayerId(index as u64), (role, tx));
+            receivers.push((role, rx));
+        }
+        broadcast(
+            &players,
+            ServerPayload::Event {
+                tick: 1,
+                event: shared::GameEvent::SurfaceExplosionObserved {
+                    bearing: 359.0,
+                    angular_size: 0.3,
+                },
+            },
+        );
+        for (role, mut rx) in receivers {
+            assert_eq!(rx.try_recv().is_ok(), role == CrewRole::Captain);
+        }
+    }
 
     fn request(role: CrewRole, action: GameRoomAction) -> GameRoomCommand {
         GameRoomCommand {

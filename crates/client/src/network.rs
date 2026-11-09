@@ -180,6 +180,9 @@ pub struct GameState {
     pub events: VecDeque<(u64, GameEvent)>,
     /// Monotonic receipt counter: bursts must survive eviction from the event history.
     pub audible_explosions: u64,
+    pub surface_explosion_sequence: u64,
+    /// Bounded transient observations, independent of the general event journal.
+    pub surface_explosions: VecDeque<(u64, f32, f32)>,
 }
 
 pub struct NetworkPlugin;
@@ -435,6 +438,8 @@ fn handle_server_message(
             state.weapons_config = Some(config.weapons);
             state.periscope_config = Some(config.periscope);
             state.events.clear();
+            state.surface_explosion_sequence = 0;
+            state.surface_explosions.clear();
             commands.clear_intents();
         }
         ServerPayload::Snapshot {
@@ -455,6 +460,22 @@ fn handle_server_message(
             }
         }
         ServerPayload::Event { tick, event } => {
+            if let GameEvent::SurfaceExplosionObserved {
+                bearing,
+                angular_size,
+            } = &event
+            {
+                state.surface_explosion_sequence =
+                    state.surface_explosion_sequence.saturating_add(1);
+                if state.surface_explosions.len() == 16 {
+                    state.surface_explosions.pop_front();
+                }
+                state.surface_explosions.push_back((
+                    state.surface_explosion_sequence,
+                    *bearing,
+                    *angular_size,
+                ));
+            }
             if matches!(event, GameEvent::ExplosionHeard) {
                 state.audible_explosions = state.audible_explosions.saturating_add(1);
             }

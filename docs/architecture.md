@@ -116,7 +116,7 @@ Le navigateur construit l'URL `ws://` ou `wss://` depuis l'origine. Lorsque Trun
 | Ingénierie | endurance, compartiments, dégâts, pompage, isolation, incendies, pannes, interventions temporisées et bot d'avaries | distribution détaillée, équilibrage et ergonomie enrichie |
 | IA | bots de poste minimaux ; escorte avec perception acoustique privée, recherche, attaque non guidée et retour au convoi | bots de poste complets et tactiques enrichies |
 | Client | lobby, postes tactiles Pilote, Ingénierie, Sonar, carte et procédures Capitaine/Armement | interfaces mobiles finalisées et état de reconnexion |
-| Protocole | version 12, identifiants opaques, projections par rôle, armement sonar/visuel, avaries, périscope, contacts visuels et configuration des vigies, accusés de commandes | reprise et négociation de compatibilité |
+| Protocole | version 13, identifiants opaques, projections par rôle, armement sonar/visuel, courses estimées, explosions observées, avaries et périscope, accusés de commandes | reprise et négociation de compatibilité |
 
 ## 5. Vue des blocs de construction
 
@@ -276,6 +276,16 @@ Le protocole v12, incompatible v11, remplace la cible des réglages de tir par `
 Chaque nouvelle désignation révoque les autorisations des tubes visuels et rend leurs anciennes révisions inutilisables jusqu'à reconfiguration. Les réglages sonar restent indépendants. Une désignation appliquée persiste après expiration du contact, avec un âge croissant et sans réassociation ; une nouvelle application exige un contact encore présent. La mémoire des positions propres d'observation est bornée par les 64 contacts du périscope.
 
 `WeaponsMeasurements` expose la désignation et son âge uniquement au Capitaine et à l'Armement. Le Sonar conserve le partage informatif P1, sans accéder aux estimations de tir. Les fixtures v12 couvrent désignation, configuration, ordre bot et sérialisation des mesures. Voir la [recette P3](recette-p3.md).
+
+### 5.8 Courses et explosions P4
+
+Le protocole v13, incompatible v12, enrichit `TorpedoMeasurements` avec la position propre de lancement, le temps écoulé et le délai d'interception calculé au lancement. Ces données restent dans les mesures Capitaine/Armement. Elles décrivent une course propre estimée, jamais une position ennemie. `torpedo_ui.rs` dessine la prévision du tube sélectionné depuis `FiringSolution`, puis les courses reçues, avec extrapolation limitée à l'intervalle nominal de snapshot (50 ms). Le repère de la carte et les pistes à distance connue partagent une échelle linéaire de 10 km.
+
+`weapons.rs` conserve temporairement les positions privées des impacts du tick. Après application des contraintes du périscope, `Simulation` les draine et les soumet au capteur visuel de `periscope.rs`. Seul `SurfaceExplosionObserved { bearing, angular_size }` traverse la frontière réseau, filtré vers le Capitaine. Aucun identifiant de navire/torpille, résultat de dégâts ou coordonnée mondiale n'est associé à cette observation. Une collision hors écoute conserve la course estimée existante, qu'une gerbe soit vue ou non ; la perception visuelle n'est pas assimilée à un suivi précis de torpille.
+
+Le client conserve une file bornée de 16 observations visuelles avec séquence locale, indépendante du journal général de 64 événements. `periscope_effects.rs` affiche au plus 16 gerbes pendant deux secondes et consomme les observations même lorsque la vue est fermée ; l'abaissement ou la fermeture efface les effets pour empêcher leur rejeu à la réouverture. Le journal du Capitaine conserve les observations sans confirmation de naufrage.
+
+`explosion_audio.rs` utilise le compteur monotone des seules explosions entendues. Une source WAV mono est synthétisée en mémoire et lue via Bevy Audio, sans ressource distante. La fonctionnalité Bevy `wav` est explicitement activée. Le bouton muet arrête les sons actifs et continue de consommer les événements sans rejeu ultérieur. Le rythme et le nombre de lectures simultanées sont bornés ; aucun audio spatial ne révèle la position d'une explosion. Les bandeaux et événements restent disponibles sans audio. L'activation et la restitution audio réelles restent à valider sur navigateur/téléphone.
 
 ## 6. Vue d'exécution
 

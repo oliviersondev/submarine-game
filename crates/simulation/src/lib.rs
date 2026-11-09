@@ -75,6 +75,73 @@ mod visual_fire_tests {
     use super::*;
     use shared::{ShotSettings, ShotTarget, VisualContactId};
 
+    #[test]
+    fn distant_visual_impact_is_observed_once_only_when_scope_is_watching() {
+        fn attack(watching: bool) -> (Simulation, Vec<GameEvent>) {
+            let mut sim = observed();
+            sim.world.vessels.truncate(1);
+            sim.world.vessels[0].y = 7000.0;
+            sim.world.vessels[0].speed = 0.0;
+            sim.apply_command(PlayerCommand::DesignateVisualTarget {
+                contact: VisualContactId(1),
+                distance: 7000.0,
+                heading: 0.0,
+                speed: 0.0,
+            })
+            .unwrap();
+            if !watching {
+                sim.apply_command(PlayerCommand::SetPeriscopeRaised(false))
+                    .unwrap();
+            }
+            sim.apply_command(PlayerCommand::OrderWeaponsBot {
+                target: ShotTarget::Visual(1),
+            })
+            .unwrap();
+            for _ in 0..800 {
+                sim.tick(0.05);
+                sim.automate_weapons(true, false);
+            }
+            let settings = sim.weapons_measurements().tubes[0].settings.unwrap();
+            sim.apply_command(PlayerCommand::AuthorizeShot { tube: 0, settings })
+                .unwrap();
+            sim.automate_weapons(true, false);
+            let mut events = vec![];
+            for _ in 0..7000 {
+                events.extend(sim.tick(0.05));
+            }
+            assert!(!sim.world.vessels[0].afloat());
+            // A visual plume is not a precise tracking update of an own torpedo.
+            assert_eq!(sim.weapons_measurements().torpedoes.len(), 1);
+            (sim, events)
+        }
+        let (mut hidden, events) = attack(false);
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            GameEvent::SurfaceExplosionObserved { .. }
+                | GameEvent::ExplosionHeard
+                | GameEvent::TorpedoImpact { .. }
+        )));
+        hidden
+            .apply_command(PlayerCommand::SetPeriscopeRaised(true))
+            .unwrap();
+        assert!(!hidden
+            .tick(0.05)
+            .iter()
+            .any(|e| matches!(e, GameEvent::SurfaceExplosionObserved { .. })));
+        let (_, events) = attack(true);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, GameEvent::SurfaceExplosionObserved { .. }))
+                .count(),
+            1
+        );
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            GameEvent::ExplosionHeard | GameEvent::TorpedoImpact { .. }
+        )));
+    }
+
     fn observed() -> Simulation {
         let mut sim = Simulation::new();
         sim.world.vessels[0].x = 0.0;
@@ -331,6 +398,14 @@ impl Simulation {
         );
         events.extend(self.update_alerts());
         self.update_periscope(dt);
+        for (x, y) in self.weapons.take_impacts() {
+            if let Some(observation) =
+                self.periscope
+                    .observe_explosion(x, y, &self.state, self.config.periscope)
+            {
+                events.push(observation);
+            }
+        }
         events
     }
 

@@ -3,8 +3,8 @@ use bevy::prelude::*;
 use shared::{CrewRole, PlayerCommand, ShotSettings, ShotTarget, TubePhase};
 
 #[derive(Resource)]
-struct WeaponUi {
-    tube: usize,
+pub(crate) struct WeaponUi {
+    pub(crate) tube: usize,
     target: Option<ShotTarget>,
     depth: f32,
     heading: f32,
@@ -349,6 +349,14 @@ fn update(
         .iter()
         .rev()
         .filter_map(|(tick, event)| match event {
+            shared::GameEvent::SurfaceExplosionObserved { bearing, .. } => Some(format!(
+                "[tick {}] Gerbe observee au periscope / {:.0} deg (navire detruit non confirme)",
+                tick, bearing
+            )),
+            shared::GameEvent::ExplosionHeard => Some(format!(
+                "[tick {}] Explosion entendue / origine non confirmee",
+                tick
+            )),
             shared::GameEvent::TorpedoImpact { torpedo_id } => Some(format!(
                 "[tick {}] Explosion observee / torpille {}",
                 tick, torpedo_id
@@ -366,6 +374,12 @@ fn update(
         .take(6)
         .collect::<Vec<_>>();
     let event = events.into_iter().rev().collect::<Vec<_>>().join("\n");
+    let courses = weapons.torpedoes.iter().map(|t| format!(
+        "TOR{} : interception dans ~{:.0}s / autonomie ~{:.0}s ({:.0}m) / course estimee, impact non garanti",
+        t.id, (t.estimated_intercept_seconds - t.elapsed_seconds).max(0.0),
+        t.remaining_meters / (state.weapons_config.unwrap_or_default().torpedo_speed_knots * 0.514444).max(0.1),
+        t.remaining_meters)).collect::<Vec<_>>().join("\n");
+    let event = format!("{event}\n{courses}");
     let selected = tracks
         .iter()
         .find(|t| Some(ShotTarget::Sonar(t.id)) == ui.target)

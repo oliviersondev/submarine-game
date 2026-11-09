@@ -3,12 +3,15 @@ use bevy::window::WindowResolution;
 
 mod button_activation;
 mod damage_control_ui;
+mod explosion_audio;
 mod explosion_ui;
 mod network;
+mod periscope_effects;
 mod periscope_graticule;
 mod periscope_ui;
 mod render;
 mod role;
+mod torpedo_ui;
 mod weapons_ui;
 
 fn main() {
@@ -28,8 +31,10 @@ fn main() {
         .add_plugins(button_activation::ButtonActivationPlugin)
         .add_plugins(render::RenderPlugin)
         .add_plugins(explosion_ui::ExplosionUiPlugin)
+        .add_plugins(explosion_audio::ExplosionAudioPlugin)
         .add_plugins(damage_control_ui::DamageControlUiPlugin)
         .add_plugins(weapons_ui::WeaponsUiPlugin)
+        .add_plugins(torpedo_ui::TorpedoUiPlugin)
         .add_plugins(periscope_ui::PeriscopeUiPlugin)
         .run();
 }

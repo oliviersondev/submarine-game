@@ -412,6 +412,20 @@ Les modifications du formulaire restent locales jusqu'à « APPLIQUER ESTIMATION
 
 Télémètre, estimation assistée et association visuel/sonar sont différés. Voir la [recette P3](recette-p3.md).
 
+#### Courses estimées et explosions (P4, implémenté le 9 novembre 2026)
+
+La carte du Capitaine et de l'Armement montre en pointillés la course et le point d'interception supposés du **tube sélectionné et configuré**. Il ne s'agit ni d'une cible réelle révélée, ni d'une garantie d'impact. La carte reste orientée au nord, avec un rayon de référence de 10 km ; les distances connues sont représentées linéairement jusqu'à cette limite.
+
+Après lancement, chaque torpille possède un identifiant propre et un symbole accompagné d'une courte traînée sur sa course **estimée**. Le poste Armement/Capitaine affiche le délai supposé jusqu'à interception et l'autonomie restante. Un délai nul ne prouve pas l'impact. L'animation entre snapshots est bornée à 50 ms, sans poursuite inventée pendant une coupure réseau.
+
+Une explosion entendue selon la portée existante de 6 km déclenche un son sourd non directionnel et le bandeau visuel habituel ; les explosions proches de charges conservent leurs propres règles d'écoute. Le bouton **SON ON / MUET** désactive l'audio sans supprimer les informations visuelles ni l'historique. Les explosions reçues ensemble peuvent être regroupées en un seul son pour éviter une saturation ; les événements restent distincts dans l'historique. Aucun point précis d'explosion n'est ajouté à la carte depuis la seule écoute.
+
+Un impact de torpille sur un navire peut produire une gerbe au périscope si celui-ci est effectivement levé, utilisable, orienté vers l'explosion et à portée au moment de l'impact. Les limites de champ/portée du périscope s'appliquent côté serveur. Le Capitaine reçoit seulement un relèvement et une taille apparente, sans identité, position exacte, intégrité ou confirmation de naufrage. La gerbe stylisée s'estompe en deux secondes ; plusieurs gerbes peuvent coexister. Elle n'est ni montrée à travers une vue abaissée ni rejouée lorsque le joueur relève ou rouvre le périscope. Une observation reste consultable dans l'historique du Capitaine.
+
+Un impact hors écoute n'arrête pas la course projetée de la torpille : même une gerbe vue n'est pas automatiquement associée à une torpille. Sans perception, le joueur ne reçoit que la fin de course estimée et la mention **impact non confirmé**. Une gerbe ne nécessite pas qu'un contact visuel ait été créé auparavant. Météo, occultation entre bâtiments et effets de naufrage détaillés restent hors périmètre, comme pour P1.
+
+Voir la [recette P4](recette-p4.md). Le son sur les navigateurs et téléphones réels reste à vérifier, notamment les restrictions d'activation audio du navigateur.
+
 ### 6.8 Tubes et munitions
 
 Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torpilles prêtes ou en réserve. La séquence normale est :
