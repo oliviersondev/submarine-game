@@ -2,15 +2,20 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
 mod button_activation;
+mod chart;
+mod chart_ui;
 mod damage_control_ui;
 mod explosion_audio;
 mod explosion_ui;
+mod mission_feedback;
+mod mission_ui;
 mod network;
 mod periscope_effects;
 mod periscope_graticule;
 mod periscope_ui;
 mod render;
 mod role;
+mod silhouette;
 mod torpedo_ui;
 mod weapons_ui;
 
@@ -36,5 +41,7 @@ fn main() {
         .add_plugins(weapons_ui::WeaponsUiPlugin)
         .add_plugins(torpedo_ui::TorpedoUiPlugin)
         .add_plugins(periscope_ui::PeriscopeUiPlugin)
+        .add_plugins(mission_ui::MissionUiPlugin)
+        .add_plugins(chart_ui::ChartUiPlugin)
         .run();
 }

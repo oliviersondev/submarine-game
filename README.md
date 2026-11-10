@@ -26,6 +26,10 @@ Un à cinq joueurs créent ou rejoignent une salle éphémère par son code cour
 
 Chaque joueur peut se déclarer prêt. Un joueur démarre explicitement la mission ; les rôles libres sont alors affichés et conservés comme bots. Plusieurs salles indépendantes peuvent fonctionner dans le même processus. Il n'y a ni persistance ni reconnexion à ce stade.
 
+**Mission niveau 1 (M6.1) :** identifier le cargo décrit au briefing parmi deux silhouettes différentes, le détruire puis rejoindre vivant l'extraction indiquée sur la carte, même sous poursuite d'une escorte. L'objectif détruit est annoncé immédiatement ; une erreur de cible reste possible. La perte du sous-marin ou la fuite de la cible termine la mission. Voir la [recette M6.1](docs/recette-m6.1.md). Le résultat est minimal ; pour rejouer, recharger et créer une nouvelle salle.
+
+La carte Capitaine/Armement affiche un secteur nautique fictif avec latitude/longitude, sous-marin orienté et cercle d'extraction à l'échelle. Zoom : **− / +** ou molette ; déplacement : glisser ; **RECENTRER** suit le sous-marin ; **EXTRACTION** cadre sa zone. Les pistes et courses restent estimées, sans positions ennemies réelles.
+
 **En solo, le joueur doit être Capitaine** et les quatre autres postes sont des bots. Les autres rôles humains restent possibles en multijoueur.
 
 ### Contrôles
@@ -144,7 +148,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement `11`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit les procédures d'armement, les diagnostics de tir et le suivi indépendant des munitions. La version 7 a ajouté les pings ennemis entendus et la configuration de recherche. La version 8 a ajouté les charges, dégâts persistants, compartiments et alertes. La version 9 a ajouté le contrôle des avaries, les incendies et les pannes. La version 10 a ajouté la configuration du périscope, ses commandes/mesures visuelles, les contacts partagés et les erreurs associées. La version 11 ajoute les paramètres des vigies ennemies, sans nouvelle commande ni mesure de détection ennemie projetée. Serveur et client doivent être mis à jour ensemble ; v11 est incompatible avec v10.
+Chaque enveloppe porte `version: u16` (actuellement **`14`**, source de vérité : `crates/shared/src/protocol.rs`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit l'armement ; v7 les pings ennemis ; v8 les dégâts ; v9 le contrôle des avaries ; v10 le périscope ; v11 les vigies ; v12 la conduite de tir visuelle ; v13 les courses estimées et explosions observées. **v14 ajoute le briefing au lobby, la progression de mission aux snapshots, l'annonce d'objectif détruit et le refus après résultat.** Serveur et client doivent être mis à jour ensemble ; v14 est incompatible avec v13.
 
 ### Client → Serveur (`ClientPayload`)
 

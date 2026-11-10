@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{BallastState, CrewRole, MissionSnapshot, SubmarineConfig, SystemId, TrackId};
 
-pub const PROTOCOL_VERSION: u16 = 13;
+pub const PROTOCOL_VERSION: u16 = 14;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(pub String);
@@ -282,6 +282,8 @@ pub enum GameEvent {
         bearing: f32,
         angular_size: f32,
     },
+    /// Level 1's explicit objective-confirmation exception; no other kill is confirmed.
+    ObjectiveDestroyed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -329,6 +331,7 @@ pub enum ProtocolError {
     VisualContactLimitReached,
     InvalidVisualEstimate,
     VisualEstimateSuperseded,
+    MissionFinished,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -417,8 +420,9 @@ pub struct RoleSlot {
     pub occupant: RoleOccupant,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LobbySnapshot {
+    pub briefing: crate::MissionBriefing,
     pub room_id: RoomId,
     pub phase: LobbyPhase,
     pub slots: Vec<RoleSlot>,
@@ -448,7 +452,41 @@ mod tests {
     use crate::codec::{decode, encode};
 
     #[test]
-    fn version_thirteen_visual_explosion_fixture_and_estimated_run_round_trip() {
+    fn version_fourteen_mission_fixtures_and_briefing_round_trip() {
+        use crate::{MissionDefeat, MissionPhase};
+        for (phase, fixture) in [
+            (MissionPhase::Attack, vec![0]),
+            (MissionPhase::Extract, vec![1]),
+            (MissionPhase::Victory, vec![2]),
+            (
+                MissionPhase::Defeat(MissionDefeat::SubmarineLost),
+                vec![3, 0],
+            ),
+            (
+                MissionPhase::Defeat(MissionDefeat::TargetEscaped),
+                vec![3, 1],
+            ),
+        ] {
+            assert_eq!(encode(&phase), fixture);
+            assert_eq!(decode::<MissionPhase>(&fixture).unwrap(), phase);
+        }
+        let message = ServerMessage::new(ServerPayload::Event {
+            tick: 42,
+            event: GameEvent::ObjectiveDestroyed,
+        });
+        assert_eq!(encode(&message), vec![14, 5, 42, 13]);
+        assert_eq!(decode::<ServerMessage>(&[14, 5, 42, 13]).unwrap(), message);
+        let lobby = ServerMessage::new(ServerPayload::Lobby(LobbySnapshot {
+            briefing: crate::MissionBriefing::level_one(1),
+            room_id: RoomId("000001".into()),
+            phase: LobbyPhase::Waiting,
+            slots: vec![],
+        }));
+        assert_eq!(decode::<ServerMessage>(&encode(&lobby)).unwrap(), lobby);
+    }
+
+    #[test]
+    fn version_fourteen_visual_explosion_fixture_and_estimated_run_round_trip() {
         let event = ServerMessage::new(ServerPayload::Event {
             tick: 42,
             event: GameEvent::SurfaceExplosionObserved {
@@ -456,7 +494,7 @@ mod tests {
                 angular_size: 1.0,
             },
         });
-        let fixture = vec![13, 5, 42, 12, 0, 0, 180, 66, 0, 0, 128, 63];
+        let fixture = vec![14, 5, 42, 12, 0, 0, 180, 66, 0, 0, 128, 63];
         assert_eq!(encode(&event), fixture);
         assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), event);
         let run = crate::TorpedoMeasurements {
@@ -478,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_visual_fire_control_fixtures_are_stable() {
+    fn version_fourteen_visual_fire_control_fixtures_are_stable() {
         for (command, fixture) in [
             (
                 PlayerCommand::DesignateVisualTarget {
@@ -488,14 +526,14 @@ mod tests {
                     speed: 8.0,
                 },
                 vec![
-                    13, 1, 0, 9, 31, 2, 0, 0, 122, 68, 0, 0, 180, 66, 0, 0, 0, 65,
+                    14, 1, 0, 9, 31, 2, 0, 0, 122, 68, 0, 0, 180, 66, 0, 0, 0, 65,
                 ],
             ),
             (
                 PlayerCommand::OrderWeaponsBot {
                     target: crate::ShotTarget::Visual(7),
                 },
-                vec![13, 1, 0, 9, 22, 1, 7],
+                vec![14, 1, 0, 9, 22, 1, 7],
             ),
             (
                 PlayerCommand::ConfigureShot {
@@ -503,7 +541,7 @@ mod tests {
                     settings: crate::ShotSettings::for_source(crate::ShotTarget::Visual(7)),
                 },
                 vec![
-                    13, 1, 0, 9, 16, 0, 1, 7, 0, 0, 128, 64, 0, 0, 0, 0, 0, 0, 0, 0,
+                    14, 1, 0, 9, 16, 0, 1, 7, 0, 0, 128, 64, 0, 0, 0, 0, 0, 0, 0, 0,
                 ],
             ),
         ] {
@@ -547,23 +585,23 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_periscope_command_fixtures_and_observations_round_trip() {
+    fn version_fourteen_periscope_command_fixtures_and_observations_round_trip() {
         for (command, fixture) in [
             (
                 PlayerCommand::SetPeriscopeRaised(true),
-                vec![13, 1, 0, 9, 27, 1],
+                vec![14, 1, 0, 9, 27, 1],
             ),
             (
                 PlayerCommand::SetPeriscopeBearing(90.0),
-                vec![13, 1, 0, 9, 28, 0, 0, 180, 66],
+                vec![14, 1, 0, 9, 28, 0, 0, 180, 66],
             ),
             (
                 PlayerCommand::CreateVisualContact { observation_id: 42 },
-                vec![13, 1, 0, 9, 29, 42],
+                vec![14, 1, 0, 9, 29, 42],
             ),
             (
                 PlayerCommand::ShareVisualContact(crate::VisualContactId(2)),
-                vec![13, 1, 0, 9, 30, 2],
+                vec![14, 1, 0, 9, 30, 2],
             ),
         ] {
             let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
@@ -609,30 +647,30 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_damage_control_commands_have_stable_fixtures() {
+    fn version_fourteen_damage_control_commands_have_stable_fixtures() {
         for (command, bytes) in [
             (
                 PlayerCommand::SetCompartmentPump {
                     compartment: 2,
                     enabled: true,
                 },
-                vec![13, 1, 0, 9, 23, 2, 1],
+                vec![14, 1, 0, 9, 23, 2, 1],
             ),
             (
                 PlayerCommand::SetCompartmentIsolated {
                     compartment: 1,
                     isolated: true,
                 },
-                vec![13, 1, 0, 9, 24, 1, 1],
+                vec![14, 1, 0, 9, 24, 1, 1],
             ),
             (
                 PlayerCommand::StartDamageControl {
                     compartment: 1,
                     action: crate::DamageControlAction::SealBreach,
                 },
-                vec![13, 1, 0, 9, 25, 1, 0],
+                vec![14, 1, 0, 9, 25, 1, 0],
             ),
-            (PlayerCommand::CancelDamageControl, vec![13, 1, 0, 9, 26]),
+            (PlayerCommand::CancelDamageControl, vec![14, 1, 0, 9, 26]),
         ] {
             let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
                 command_id: CommandId(9),
@@ -694,32 +732,32 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_fixtures_detect_enum_reordering() {
+    fn version_fourteen_fixtures_detect_enum_reordering() {
         let create = ClientMessage::new(ClientPayload::Lobby(LobbyCommand::CreateRoom {
             role: CrewRole::Captain,
         }));
         let ready =
             ClientMessage::new(ClientPayload::Lobby(LobbyCommand::SetReady { ready: true }));
 
-        assert_eq!(encode(&create), vec![13, 0, 0, 0]);
-        assert_eq!(encode(&ready), vec![13, 0, 2, 1]);
-        assert_eq!(decode::<ClientMessage>(&[13, 0, 0, 0]).unwrap(), create);
-        assert_eq!(decode::<ClientMessage>(&[13, 0, 2, 1]).unwrap(), ready);
+        assert_eq!(encode(&create), vec![14, 0, 0, 0]);
+        assert_eq!(encode(&ready), vec![14, 0, 2, 1]);
+        assert_eq!(decode::<ClientMessage>(&[14, 0, 0, 0]).unwrap(), create);
+        assert_eq!(decode::<ClientMessage>(&[14, 0, 2, 1]).unwrap(), ready);
     }
 
     #[test]
-    fn version_thirteen_m2_command_fixture_is_stable() {
+    fn version_fourteen_m2_command_fixture_is_stable() {
         let message = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::SetBallast(BallastState::Flood),
         }));
-        let fixture = vec![13, 1, 0, 9, 3, 0];
+        let fixture = vec![14, 1, 0, 9, 3, 0];
         assert_eq!(encode(&message), fixture);
         assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
     }
 
     #[test]
-    fn version_thirteen_weapons_and_acknowledgment_fixtures_are_stable() {
+    fn version_fourteen_weapons_and_acknowledgment_fixtures_are_stable() {
         let load = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(9),
             command: PlayerCommand::LoadTube(0),
@@ -729,8 +767,8 @@ mod tests {
             command: PlayerCommand::FireTorpedo { tube: 0 },
         }));
         for (message, fixture) in [
-            (load, vec![13, 1, 0, 9, 15, 0]),
-            (fire, vec![13, 1, 0, 9, 9, 0]),
+            (load, vec![14, 1, 0, 9, 15, 0]),
+            (fire, vec![14, 1, 0, 9, 9, 0]),
         ] {
             assert_eq!(encode(&message), fixture);
             assert_eq!(decode::<ClientMessage>(&fixture).unwrap(), message);
@@ -738,8 +776,8 @@ mod tests {
         let ack = ServerMessage::new(ServerPayload::CommandAccepted {
             command_id: CommandId(9),
         });
-        assert_eq!(encode(&ack), vec![13, 0, 9]);
-        assert_eq!(decode::<ServerMessage>(&[13, 0, 9]).unwrap(), ack);
+        assert_eq!(encode(&ack), vec![14, 0, 9]);
+        assert_eq!(decode::<ServerMessage>(&[14, 0, 9]).unwrap(), ack);
         let configured = ClientMessage::new(ClientPayload::Mission(MissionCommand::Player {
             command_id: CommandId(10),
             command: PlayerCommand::ConfigureShot {
@@ -754,11 +792,16 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_mission_snapshot_round_trips() {
+    fn version_fourteen_mission_snapshot_round_trips() {
         let message = ServerMessage::new(ServerPayload::Snapshot {
             snapshot_id: 3,
             tick: 7,
             mission: MissionSnapshot {
+                progress: crate::MissionProgress {
+                    briefing: crate::MissionBriefing::level_one(42),
+                    phase: crate::MissionPhase::Extract,
+                    elapsed_seconds: 123.5,
+                },
                 periscope: None,
                 visual_contacts: vec![],
                 submarine: crate::SubmarineSnapshot {
@@ -795,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_ping_fixture_and_mission_config_round_trip() {
+    fn version_fourteen_ping_fixture_and_mission_config_round_trip() {
         let ping = ServerMessage::new(ServerPayload::Event {
             tick: 42,
             event: GameEvent::SonarPingHeard {
@@ -803,7 +846,7 @@ mod tests {
                 bearing_uncertainty: 3.0,
             },
         });
-        let fixture = vec![13, 5, 42, 8, 0, 0, 180, 66, 0, 0, 64, 64];
+        let fixture = vec![14, 5, 42, 8, 0, 0, 180, 66, 0, 0, 64, 64];
         assert_eq!(encode(&ping), fixture);
         assert_eq!(decode::<ServerMessage>(&fixture).unwrap(), ping);
         let message = ServerMessage::new(ServerPayload::MissionStarted {
@@ -813,20 +856,20 @@ mod tests {
     }
 
     #[test]
-    fn version_thirteen_damage_events_have_stable_fixtures() {
+    fn version_fourteen_damage_events_have_stable_fixtures() {
         for (event, fixture) in [
-            (GameEvent::ExplosionHeard, vec![13, 5, 42, 9]),
+            (GameEvent::ExplosionHeard, vec![14, 5, 42, 9]),
             (
                 GameEvent::SubmarineDamaged {
                     cause: crate::DamageCause::DepthCharge,
                 },
-                vec![13, 5, 42, 10, 0],
+                vec![14, 5, 42, 10, 0],
             ),
             (
                 GameEvent::SubmarineDestroyed {
                     cause: crate::DamageCause::Flooding,
                 },
-                vec![13, 5, 42, 11, 2],
+                vec![14, 5, 42, 11, 2],
             ),
         ] {
             let message = ServerMessage::new(ServerPayload::Event { tick: 42, event });

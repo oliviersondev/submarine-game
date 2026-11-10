@@ -287,6 +287,18 @@ Le client conserve une file bornée de 16 observations visuelles avec séquence 
 
 `explosion_audio.rs` utilise le compteur monotone des seules explosions entendues. Une source WAV mono est synthétisée en mémoire et lue via Bevy Audio, sans ressource distante. La fonctionnalité Bevy `wav` est explicitement activée. Le bouton muet arrête les sons actifs et continue de consommer les événements sans rejeu ultérieur. Le rythme et le nombre de lectures simultanées sont bornés ; aucun audio spatial ne révèle la position d'une explosion. Les bandeaux et événements restent disponibles sans audio. L'activation et la restitution audio réelles restent à valider sur navigateur/téléphone.
 
+### 5.9 Mission niveau 1 M6.1
+
+Le protocole **v14, incompatible v13**, ajoute les types légers `MissionBriefing`, `ExtractionZone`, `MissionProgress`, `MissionPhase` et `MissionDefeat` dans `shared/src/mission.rs`. Le lobby transmet le profil de la cible et la géométrie publique ; chaque `MissionSnapshot` contient le briefing, la phase et le temps simulé. Les cinq postes reçoivent ces mêmes informations, jamais l'indice privé du cargo, son intégrité, sa position réelle ou l'état de poursuite ennemi. `ObjectiveDestroyed` est un événement sans données supplémentaires ; `MissionFinished` refuse les commandes après le résultat.
+
+`Simulation` possède le cycle attaque → extraction → victoire, ou défaite pour perte du sous-marin/sortie de cible. L'évaluation suit les dégâts et impacts du tick ; la perte du sous-marin est prioritaire. Les frontières d'extraction sont inclusives et ne dépendent pas de l'IA ennemie. Les cargos ne rebondissent plus à la limite de la zone. Après résultat, physique, temps simulé, commandes et automatismes restent figés ; le serveur continue les snapshots numérotés pour conserver le résultat observable.
+
+La confirmation de destruction du cargo objectif est une **exception produit explicite au niveau 1**, indépendante des capteurs ; elle ne modifie pas les contacts, solutions ou courses estimées. Le snapshot conserve la phase extraction/victoire même si l'événement est manqué ou évincé de l'historique. Aucun autre naufrage n'est confirmé. Le mode difficile sans annonce est différé.
+
+`client/src/silhouette.rs` définit deux profils cargo originaux distincts et un profil escorte, utilisés à la fois par le briefing et le périscope. Le serveur conserve la décision de visibilité et le choix du profil observé. `mission_ui.rs` présente le briefing défilable, l'annonce d'objectif, le résultat minimal et le repère d'extraction sur la carte nord en haut à 10 km. Le client ne décide ni de l'identification correcte ni du résultat. Le bilan détaillé et la relance dans la même salle restent hors périmètre.
+
+**Évolution cartographique :** `client/src/chart.rs` possède la projection métrique uniforme, son inverse, le zoom borné, le déplacement, le découpage de segments et la conversion vers des coordonnées fictives autour de 48° N / 10° O. `chart_ui.rs` affiche quadrillage, sous-marin orienté, cercle d'extraction, limites publiques, pistes estimées et commandes tactiles. La ressource locale `ChartView` conserve centre, demi-portée, dimensions logiques et mode de suivi ; elle est mise à jour après réception réseau, avant le dessin de la carte et de `torpedo_ui.rs`, qui partage exactement cette projection. L'extraction n'est plus rendue séparément par `mission_ui.rs`. Le rapport de pixels par mètre dépend du petit axe de la vue, jamais de deux pourcentages indépendants. Le Sonar garde sa représentation polaire. Aucun état ennemi privé ni nouveau message réseau n'est nécessaire.
+
 ## 6. Vue d'exécution
 
 ### 6.1 Connexion et démarrage cible

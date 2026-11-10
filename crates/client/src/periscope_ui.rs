@@ -120,9 +120,7 @@ struct SceneGeometry;
 #[derive(Component)]
 struct Slot(usize);
 #[derive(Component)]
-struct Hull(usize);
-#[derive(Component)]
-struct Funnel(usize, usize);
+struct SilhouettePart(usize, usize);
 
 pub struct PeriscopeUiPlugin;
 impl Plugin for PeriscopeUiPlugin {
@@ -555,18 +553,9 @@ fn spawn(mut commands: Commands) {
                     ));
                     button_activation::enable(&mut slot);
                     slot.with_children(|s| {
-                        s.spawn((
-                            Hull(index),
-                            Node {
-                                position_type: PositionType::Absolute,
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.025, 0.035, 0.04)),
-                            Pickable::IGNORE,
-                        ));
-                        for funnel in 0..2 {
+                        for part in 0..8 {
                             s.spawn((
-                                Funnel(index, funnel),
+                                SilhouettePart(index, part),
                                 Node {
                                     position_type: PositionType::Absolute,
                                     ..default()
@@ -1015,8 +1004,7 @@ fn update(
             &mut Node,
             &mut Visibility,
             Option<&Slot>,
-            Option<&Hull>,
-            Option<&Funnel>,
+            Option<&SilhouettePart>,
             Has<SceneGeometry>,
             Has<ClosedViewMessage>,
         ),
@@ -1130,7 +1118,7 @@ fn update(
         });
     }
     let width = view.size.x * view.inverse_scale_factor;
-    for (mut node, mut v, slot, hull, funnel, geometry, closed_message) in &mut nodes {
+    for (mut node, mut v, slot, part, geometry, closed_message) in &mut nodes {
         if closed_message {
             *v = if notice.is_some() {
                 Visibility::Inherited
@@ -1145,10 +1133,7 @@ fn update(
                 Visibility::Hidden
             };
         }
-        let index = slot
-            .map(|s| s.0)
-            .or_else(|| hull.map(|s| s.0))
-            .or_else(|| funnel.map(|s| s.0));
+        let index = slot.map(|s| s.0).or_else(|| part.map(|s| s.0));
         let Some(index) = index else {
             continue;
         };
@@ -1173,25 +1158,13 @@ fn update(
             node.left = px(x - 22.0);
             node.top = px(108.0 - 44.0);
         }
-        if hull.is_some() {
-            node.left = px(22.0 - w * 0.5);
-            node.bottom = px(0);
-            node.width = px(w);
-            node.height = px(h * 0.4);
-        }
-        if let Some(f) = funnel {
-            let count = if s.kind == SilhouetteKind::TwinFunnelCargo {
-                2
-            } else {
-                1
-            };
-            if f.1 >= count {
-                *v = Visibility::Hidden;
-            }
-            node.left = px(22.0 + (f.1 as f32 - (count - 1) as f32 * 0.5) * w * 0.3 * s.aspect);
-            node.bottom = px(h * 0.35);
-            node.width = px((w * 0.12).max(1.0));
-            node.height = px(h * 0.65);
+        if let Some(f) = part {
+            let (left, bottom, part_width, part_height) = crate::silhouette::parts(s.kind)[f.1];
+            let center = (left + part_width * 0.5 - 0.5) * s.aspect;
+            node.left = px(22.0 + center * w - w * part_width * 0.5);
+            node.bottom = px(h * bottom);
+            node.width = px((w * part_width).max(1.0));
+            node.height = px((h * part_height).max(1.0));
         }
     }
 }
@@ -1485,6 +1458,7 @@ mod tests {
             &player
         ));
         state.lobby = Some(shared::LobbySnapshot {
+            briefing: shared::MissionBriefing::level_one(0),
             room_id: shared::RoomId("000001".into()),
             phase: shared::LobbyPhase::Running,
             slots: vec![shared::RoleSlot {

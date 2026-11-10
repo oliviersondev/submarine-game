@@ -10,7 +10,13 @@ Pour valider la riposte et les dégâts : **[Recette M5.2](recette-m5.2.md)**.
 
 Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.3.md)** (pompes, isolation, incendies, pannes et bot Ingénierie).
 
-## Dernier incrément — Courses de torpilles et explosions
+## Dernier incrément — M6.1, mission niveau 1
+
+La première boucle complète est implémentée : **deux cargos aux profils distincts et une escorte**, briefing illustré, identification manuelle, destruction du cargo prioritaire puis extraction fixe. L'objectif détruit est annoncé immédiatement ; les autres naufrages restent non confirmés. La perte du sous-marin ou la sortie du cargo cible termine la mission en défaite. Le résultat arrête la simulation ; bilan détaillé et relance dans la même salle restent différés. Voir la **[recette M6.1](recette-m6.1.md)** ; recette navigateur/téléphone et équilibrage en conditions normales restent à confirmer.
+
+La carte Capitaine/Armement devient une **carte nautique fictive** : grille latitude/longitude, échelle uniforme, sous-marin orienté, cercle d'extraction à l'échelle, zoom, déplacement et recentrage. Les pistes restent estimées ; les relèvements sans distance ne deviennent pas des positions. Ce rendu reste en protocole v14. Voir la section cartographie de la recette M6.1.
+
+## Courses de torpilles et explosions
 
 **P4 : visualisation des courses estimées et perception des explosions** est implémenté : pointillés et interception supposée du tube sélectionné sur la carte, torpilles estimées avec traînée, temps/autonomie, son désactivable des explosions entendues et gerbes temporaires au périscope. Aucun impact caché ni navire détruit n'est confirmé gratuitement. Voir la **[recette P4](recette-p4.md)** ; le rendu navigateur/téléphone et l'audio réel restent à valider.
 

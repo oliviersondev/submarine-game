@@ -2,6 +2,8 @@ mod damage;
 mod depth_charges;
 mod detection;
 mod enemy_ai;
+#[cfg(test)]
+mod mission_tests;
 mod periscope;
 mod tracks;
 mod visual_detection;
@@ -30,6 +32,7 @@ pub enum SimulationError {
     InvalidTrackMerge,
     SonarPingCoolingDown,
     SubmarineDestroyed,
+    MissionFinished,
 }
 
 impl From<TrackError> for SimulationError {
@@ -51,6 +54,7 @@ impl From<SimulationError> for ProtocolError {
             SimulationError::InvalidTrackMerge => Self::InvalidTrackMerge,
             SimulationError::SonarPingCoolingDown => Self::SonarPingCoolingDown,
             SimulationError::SubmarineDestroyed => Self::SubmarineDestroyed,
+            SimulationError::MissionFinished => Self::MissionFinished,
         }
     }
 }
@@ -68,6 +72,7 @@ pub struct Simulation {
     weapons: weapons::Weapons,
     damage: damage::Damage,
     periscope: periscope::Periscope,
+    mission: shared::MissionProgress,
 }
 
 #[cfg(test)]
@@ -288,6 +293,11 @@ impl Simulation {
             weapons: weapons::Weapons::new(),
             damage: damage::Damage::default(),
             periscope: periscope::Periscope::default(),
+            mission: shared::MissionProgress {
+                briefing: shared::MissionBriefing::level_one(config.seed),
+                phase: shared::MissionPhase::Attack,
+                elapsed_seconds: 0.0,
+            },
         };
         sim.update_periscope(0.0);
         sim
@@ -297,7 +307,12 @@ impl Simulation {
         if !dt.is_finite() || dt <= 0.0 {
             return vec![];
         }
+        if self.mission.phase.finished() {
+            return vec![];
+        }
+        self.mission.elapsed_seconds += f64::from(dt);
         if self.damage_summary().destroyed {
+            self.mission.phase = shared::MissionPhase::Defeat(shared::MissionDefeat::SubmarineLost);
             self.tick = self.tick.wrapping_add(1);
             self.update_periscope(dt);
             return vec![];
@@ -406,7 +421,45 @@ impl Simulation {
                 events.push(observation);
             }
         }
+        self.update_mission(&mut events);
         events
+    }
+
+    pub fn mission_progress(&self) -> shared::MissionProgress {
+        self.mission
+    }
+
+    fn update_mission(&mut self, events: &mut Vec<GameEvent>) {
+        use shared::{MissionDefeat, MissionPhase};
+        if self.mission.phase.finished() {
+            return;
+        }
+        // Own loss takes priority, including on the extraction tick.
+        if self.damage_summary().destroyed {
+            self.mission.phase = MissionPhase::Defeat(MissionDefeat::SubmarineLost);
+            return;
+        }
+        if self.mission.phase == MissionPhase::Attack {
+            // This index remains private to simulation. The briefing only names a profile.
+            let Some(target) = self.world.vessels.get((self.config.seed % 2) as usize) else {
+                return;
+            };
+            if !target.afloat() {
+                self.mission.phase = MissionPhase::Extract;
+                events.push(GameEvent::ObjectiveDestroyed);
+            } else if target.x.abs() > self.mission.briefing.operation_half_extent
+                || target.y.abs() > self.mission.briefing.operation_half_extent
+            {
+                self.mission.phase = MissionPhase::Defeat(MissionDefeat::TargetEscaped);
+                return;
+            }
+        }
+        let zone = self.mission.briefing.extraction;
+        if self.mission.phase == MissionPhase::Extract
+            && (self.state.x - zone.x).hypot(self.state.y - zone.y) <= zone.radius
+        {
+            self.mission.phase = MissionPhase::Victory;
+        }
     }
 
     pub fn apply_command(
@@ -415,6 +468,9 @@ impl Simulation {
     ) -> Result<Vec<GameEvent>, SimulationError> {
         if self.damage_summary().destroyed {
             return Err(SimulationError::SubmarineDestroyed);
+        }
+        if self.mission.phase.finished() {
+            return Err(SimulationError::MissionFinished);
         }
         let parameters = self.config.submarine;
         use shared::SystemId;
@@ -604,7 +660,7 @@ impl Simulation {
     }
 
     pub fn automate_engineer(&mut self) {
-        if self.damage_summary().destroyed {
+        if self.mission.phase.finished() || self.damage_summary().destroyed {
             return;
         }
         let intake = self.air_intake_available();
@@ -678,7 +734,10 @@ impl Simulation {
     }
 
     pub fn automate_sonar(&mut self) {
-        if self.damage_summary().destroyed || !self.damage.available(shared::SystemId::Sonar) {
+        if self.mission.phase.finished()
+            || self.damage_summary().destroyed
+            || !self.damage.available(shared::SystemId::Sonar)
+        {
             return;
         }
         let track_ids: Vec<_> = self
@@ -712,7 +771,10 @@ impl Simulation {
     }
 
     pub fn automate_weapons(&mut self, weapons_bot: bool, captain_bot: bool) -> Vec<GameEvent> {
-        if self.damage_summary().destroyed || !self.damage.available(shared::SystemId::Torpedo) {
+        if self.mission.phase.finished()
+            || self.damage_summary().destroyed
+            || !self.damage.available(shared::SystemId::Torpedo)
+        {
             return vec![];
         }
         let tracks = self.tracker.shared_estimates();

@@ -2,6 +2,8 @@
 use bevy::prelude::*;
 
 use crate::{
+    chart::{direction, ChartView},
+    chart_ui::ChartViewSet,
     network::{GameState, NetworkReceiveSet},
     weapons_ui::WeaponUi,
 };
@@ -9,7 +11,6 @@ use crate::{
 const PREVIEW_DOTS: usize = 24;
 const TRAIL_DOTS: usize = 6;
 const RUN_SLOTS: usize = 5;
-const MAP_RANGE: f32 = 10_000.0;
 
 #[derive(Component, Clone, Copy)]
 enum Mark {
@@ -30,7 +31,7 @@ pub struct TorpedoUiPlugin;
 impl Plugin for TorpedoUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SnapshotClock>()
-            .add_systems(Update, update.after(NetworkReceiveSet));
+            .add_systems(Update, update.after(NetworkReceiveSet).after(ChartViewSet));
     }
 }
 
@@ -81,21 +82,11 @@ pub(crate) fn spawn(parent: &mut ChildSpawnerCommands) {
         });
 }
 
-/// Same north-up, 10km radius as the tactical contact map. No guessed enemy position.
-fn map_point(relative: Vec2) -> Vec2 {
-    let point = relative.clamp_length_max(MAP_RANGE) / MAP_RANGE * 40.0;
-    Vec2::new(50.0 + point.x, 50.0 - point.y)
-}
-
-fn direction(bearing: f32) -> Vec2 {
-    let radians = bearing.to_radians();
-    Vec2::new(radians.sin(), radians.cos())
-}
-
 fn update(
     state: Res<GameState>,
     ui: Res<WeaponUi>,
     time: Res<Time<Real>>,
+    view: Res<ChartView>,
     mut clock: ResMut<SnapshotClock>,
     mut marks: Query<(&Mark, &mut Text, &mut Node, &mut Visibility)>,
 ) {
@@ -120,8 +111,17 @@ fn update(
         }
         let position = match *mark {
             Mark::Legend => {
-                text.0 = format!("ESTIME / tube {} / + interception / 10km", ui.tube + 1);
-                Vec2::new(1.0, 88.0)
+                if weapons
+                    .solutions
+                    .get(ui.tube)
+                    .and_then(|s| s.as_ref())
+                    .is_none()
+                    && weapons.torpedoes.is_empty()
+                {
+                    continue;
+                }
+                text.0 = format!("ESTIME / tube {} / + interception", ui.tube + 1);
+                Vec2::new(8.0, view.size.y - 42.0)
             }
             Mark::Preview(_) | Mark::Intercept => {
                 let Some(solution) = weapons.solutions.get(ui.tube).and_then(|s| s.as_ref()) else {
@@ -139,7 +139,7 @@ fn update(
                     "."
                 }
                 .into();
-                map_point(end * fraction)
+                view.project(own + end * fraction)
             }
             Mark::Trail(slot, _) | Mark::Torpedo(slot) => {
                 let Some(t) = weapons.torpedoes.get(slot) else {
@@ -156,11 +156,14 @@ fn update(
                 } else {
                     text.0 = format!("o TOR{}", t.id);
                 }
-                map_point(point - own)
+                view.project(point)
             }
         };
-        node.left = percent(position.x);
-        node.top = percent(position.y);
+        if !view.contains(position) {
+            continue;
+        }
+        node.left = px(position.x);
+        node.top = px(position.y);
         *visibility = Visibility::Inherited;
     }
 }
@@ -170,10 +173,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tactical_geometry_is_north_up_and_bounded() {
-        assert_eq!(map_point(Vec2::ZERO), Vec2::splat(50.0));
-        assert_eq!(map_point(Vec2::new(0.0, 10_000.0)), Vec2::new(50.0, 10.0));
-        assert_eq!(map_point(Vec2::new(20_000.0, 0.0)), Vec2::new(90.0, 50.0));
+    fn tactical_geometry_uses_the_chart_view_without_clamping_hidden_positions() {
+        let view = ChartView::default();
+        assert_eq!(view.project(Vec2::ZERO), view.size * 0.5);
+        assert!(view.project(Vec2::new(0.0, 10_000.0)).y < view.size.y * 0.5);
+        assert!(!view.contains(view.project(Vec2::new(100_000.0, 0.0))));
         assert!(direction(90.0).distance(Vec2::X) < 0.001);
     }
 }

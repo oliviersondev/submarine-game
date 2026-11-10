@@ -93,6 +93,8 @@ Après une détection ou un impact, les escortes recherchent puis attaquent le s
 
 Une mission se termine lorsque le sous-marin atteint sa zone d'extraction, lorsque les objectifs sont accomplis et la menace quittée, lorsque le temps expire ou lorsque le sous-marin est perdu.
 
+**Implémentation M6.1 — niveau 1 :** la destruction du cargo prioritaire puis l'entrée du sous-marin vivant dans l'extraction suffisent, même sous poursuite. La perte du sous-marin ou la sortie du cargo cible provoque la défaite ; aucune limite de temps supplémentaire n'est appliquée. Les autres règles de fin ci-dessus restent une direction cible.
+
 ## 4. Équipage
 
 Les cinq rôles existants sont conservés. Cette répartition réduit les changements structurels tout en donnant à chaque poste une identité forte.
@@ -475,6 +477,18 @@ La première mission complète sert de scénario directeur :
 
 Le briefing, l'objectif prioritaire, les conditions de fin et le bilan ne font pas partie du développement P1 consacré au périscope.
 
+#### M6.1 — Niveau 1 implémenté
+
+- Composition fixe : **deux cargos différents et une escorte**. Aucun doublon de silhouette cargo dans ce niveau. Profils originaux inspirés des cargos historiques : château arrière/une cheminée/deux grands mâts de charge, contre château central/deux cheminées/mâts courts. Le briefing et le périscope utilisent les mêmes formes, sans réutiliser l'image de référence.
+- La graine détermine lequel des deux cargos est prioritaire. Le briefing présente son profil de côté et sa description, sans identité ni position ennemie. La vue réelle dépend de l'angle et de la distance ; de face ou de loin, l'identification peut rester difficile. Aucun acquittement ne valide le choix du joueur comme étant la bonne cible.
+- **Exception explicite du niveau 1 :** la destruction du cargo prioritaire annonce immédiatement « Objectif détruit — rejoignez l'extraction », même sans observation ou écoute. Cette confirmation ne concerne aucun autre naufrage et ne corrige ni les pistes ni les courses estimées de torpilles. Un mode difficile sans cette annonce est différé.
+- Extraction fixe connue au briefing et repérée sur la carte : **X = 0 m, Y = −2 000 m, rayon 500 m**, frontière incluse. L'entrée vivant après destruction de la cible donne la victoire, même poursuivi. L'entrée avant destruction ne remplit pas l'objectif.
+- Zone d'opération : carré **[−7 000 ; +7 000] m** sur chaque axe. Un cargo prioritaire encore à flot qui franchit cette limite provoque la défaite. Les cargos poursuivent leur route au lieu de rebondir sur cette frontière. La sortie d'un autre navire n'est pas une cause de défaite ; la sortie du sous-marin n'en est pas une non plus.
+- La perte du sous-marin est prioritaire sur une extraction ou une destruction de cible au même tick. Une fois le résultat acquis, simulation, commandes et bots sont figés. Il n'y a pas de limite de temps supplémentaire, d'obligation de rompre la poursuite ou de nouvelle cause de défaite liée à l'air.
+- Le briefing est consultable au lobby et pendant la partie. L'écran de résultat indique victoire/défaite et son motif, durée et coque restante. Le bilan explicatif, la deuxième escorte, les objectifs secondaires, les difficultés et la relance dans la même salle sont différés. Pour rejouer : recharger et créer une nouvelle salle.
+
+Ces règles précisent le niveau 1 ; les conditions générales et le bilan détaillé des sections suivantes restent la cible des incréments M6 suivants. Recette : [M6.1](recette-m6.1.md).
+
 ### 7.2 Conditions de victoire
 
 - objectif principal accompli ;
@@ -506,6 +520,20 @@ Le bilan explique la partie au lieu de ne montrer qu'un score : objectifs, navir
 - Aucune interaction importante ne dépend d'un survol.
 - Les cibles tactiles mesurent au moins 44 pixels CSS.
 - Les animations restent courtes et désactivables.
+
+#### Carte nautique fictive — Capitaine et Armement
+
+La carte tactique utilise une projection locale nord en haut, avec **la même échelle sur les deux axes**, quelle que soit la forme de l'écran. L'origine métrique de mission est présentée comme **48° N / 10° O**, référence d'un secteur fictif, sans fond géographique externe ni côtes réelles. Les coordonnées affichées sont calculées par approximation locale équirectangulaire : un mille nautique vaut 1 852 m, une minute de latitude ; l'échelle de longitude tient compte du cosinus de 48°. Ce repère est un habillage du plan métrique, pas une nouvelle règle de simulation.
+
+- Quadrillage adaptatif avec graduations latitude/longitude, nord, barre d'échelle en milles nautiques et mètres, coordonnées et cap propres.
+- Sous-marin représenté en vue de dessus par une icône orientée et une ligne de cap. L'icône a une taille symbolique lisible ; elle n'est pas dessinée à la taille réelle du bâtiment.
+- Extraction dessinée par un **cercle à l'échelle de son rayon autoritaire**, avec distance propre et rayon ; la limite publique du carré d'opération est également tracée.
+- Si le sous-marin est dans ce cercle alors que l'objectif principal n'est pas accompli, le cercle devient ambre et la situation tactique affiche « Zone d'extraction atteinte — objectif principal non accompli — mission toujours en cours ». Ce retour non bloquant persiste tant que la condition est vraie, même en vue libre, puis disparaît à la sortie ou au changement de phase. Il ne termine ni n'abandonne la mission.
+- Zoom par boutons **− / +** et molette au-dessus de la carte ; la demi-portée du petit axe varie de 500 m à 20 km (10 km par défaut). Le zoom reste centré sur la vue. Glissement souris ou tactile pour déplacer : le suivi est désactivé, avec mention « vue libre ». **RECENTRER** réactive le suivi du sous-marin sans changer le zoom ; **EXTRACTION** cadre la zone à une demi-portée de 2 km.
+- Le déplacement/zoom ne commande jamais le sous-marin. La conversion écran/monde est commune aux pistes, courses estimées, prévisions et extraction ; les objets hors champ sont masqués ou découpés, pas collés artificiellement au bord.
+- Les pistes partagées à distance connue sont marquées **EST.**, avec une zone d'incertitude indicative issue des seules incertitudes reçues. Sans distance connue, seul un relèvement est tracé avec « DIST. ? », sans inventer de position. L'affichage polaire propre au Sonar reste distinct.
+
+Le changement est uniquement client et ne modifie ni le protocole v14, ni la visibilité des ennemis, ni les conditions d'extraction. Pas de zoom par pincement pour ce premier incrément : les boutons tactiles restent disponibles.
 
 ### 8.2 Téléphone
 

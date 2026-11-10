@@ -442,6 +442,7 @@ pub struct TacticalMeasurements {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissionSnapshot {
+    pub progress: crate::MissionProgress,
     pub periscope: Option<crate::PeriscopeMeasurements>,
     pub visual_contacts: Vec<crate::VisualContact>,
     pub submarine: SubmarineSnapshot,

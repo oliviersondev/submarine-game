@@ -240,6 +240,7 @@ fn send_snapshots(
 
 fn project_mission(sim: &Simulation, role: CrewRole) -> MissionSnapshot {
     MissionSnapshot {
+        progress: sim.mission_progress(),
         periscope: (role == CrewRole::Captain).then(|| sim.periscope_measurements()),
         visual_contacts: match role {
             CrewRole::Captain => sim.visual_contacts(false),
@@ -304,6 +305,48 @@ fn project_submarine(sim: &Simulation, role: CrewRole) -> SubmarineSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_mission_progress_reaches_every_role_even_without_events() {
+        let mut sim = Simulation::with_config(MissionConfig::new(42));
+        for role in CrewRole::ALL {
+            let view = project_mission(&sim, role);
+            assert_eq!(view.progress, sim.mission_progress());
+            assert_eq!(view.progress.phase, shared::MissionPhase::Attack);
+            assert_eq!(
+                view.progress.briefing,
+                shared::MissionBriefing::level_one(42)
+            );
+        }
+        sim.state.hull_integrity = 1.0;
+        sim.state.depth = sim.config.submarine.crush_depth + 10.0;
+        sim.tick(1.1);
+        for role in CrewRole::ALL {
+            assert_eq!(
+                project_mission(&sim, role).progress.phase,
+                shared::MissionPhase::Defeat(shared::MissionDefeat::SubmarineLost)
+            );
+        }
+    }
+
+    #[test]
+    fn objective_announcement_is_public_without_enemy_identity_or_position() {
+        let mut players = HashMap::new();
+        let mut receivers = vec![];
+        for (index, role) in CrewRole::ALL.into_iter().enumerate() {
+            let (tx, rx) = mpsc::channel(2);
+            players.insert(PlayerId(index as u64), (role, tx));
+            receivers.push(rx);
+        }
+        let payload = ServerPayload::Event {
+            tick: 42,
+            event: shared::GameEvent::ObjectiveDestroyed,
+        };
+        broadcast(&players, payload.clone());
+        for mut rx in receivers {
+            assert_eq!(rx.try_recv().unwrap().payload, payload);
+        }
+    }
 
     #[test]
     fn visual_explosions_are_only_broadcast_to_the_captain() {

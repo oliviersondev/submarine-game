@@ -47,7 +47,7 @@ L'escorte possède une recherche acoustique privée, des pings actifs et un reto
 | P2 | le périscope exposé peut être détecté par l'ennemi | implémenté, recette manuelle et équilibrage à confirmer |
 | P3 | attaquer depuis des estimations visuelles manuelles, sans sonar | implémenté, recette manuelle et équilibrage à confirmer |
 | P4 | suivre les courses estimées, entendre les explosions et voir les gerbes au périscope | implémenté, recette navigateur/téléphone et audio à confirmer |
-| M6 | une mission complète possède victoire, défaite et bilan | critique |
+| M6 | M6.1 niveau 1 implémenté ; bilan détaillé et extensions à suivre | critique |
 | M7 | les cinq postes sont utilisables sur téléphone | élevée |
 | M8 | reconnexion, robustesse et déploiement de démonstration | élevée |
 | M9 | équilibrage, tutoriels et préparation de la première version | normale |
@@ -380,7 +380,23 @@ Les valeurs initiales sont des paramètres d'équilibrage centralisés dans `Per
 
 **Objectif joueur :** jouer de bout en bout la mission définie dans le GDD.
 
-**Ordre retenu :** P1/P2, conduite de tir visuelle manuelle P3 et retours de tir P4 avant M6. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. Limite de temps et autres causes de défaite restent à détailler lors du cadrage M6. P1/P2/P3/P4 ne livrent ni ces règles ni l'écran de fin.
+**Ordre retenu :** P1/P2, conduite de tir visuelle manuelle P3 et retours de tir P4 avant M6. Pour la première boucle M6, le cargo prioritaire est décrit visuellement au briefing et reconnu par le Capitaine au périscope ; une mauvaise désignation reste possible et ne remplit pas l'objectif. La victoire exige sa destruction puis l'arrivée du sous-marin vivant dans une zone d'extraction fixe connue dès le briefing. La perte du sous-marin ou la sortie du cargo avant sa destruction provoque la défaite. P1/P2/P3/P4 ne livrent ni ces règles ni l'écran de fin.
+
+### M6.1 — Première boucle complète, niveau 1
+
+**Statut :** implémenté le 10 novembre 2026 ; recette navigateur/téléphone et équilibrage à confirmer.
+
+- Deux cargos aux silhouettes uniques et une escorte ; briefing illustré consultable avant et pendant la mission, avec description de la cible sans validation automatique de désignation.
+- Annonce immédiate de la destruction du cargo prioritaire, conservée par la phase dans les snapshots ; aucune confirmation des autres naufrages. Mode difficile sans annonce différé.
+- Extraction fixe X 0 / Y −2 000 m, rayon 500 m : entrer vivant après destruction de la cible suffit, même sous poursuite.
+- Défaite sur perte du sous-marin (prioritaire au même tick) ou sortie de la cible vivante du carré ±7 000 m. Aucune limite de temps supplémentaire.
+- Résultat minimal avec motif, durée et coque restante ; arrêt de la simulation et refus des commandes/bots après résultat. Pour rejouer, recharger la page et créer une nouvelle salle.
+- Protocole v14 coordonné, fixtures et tests de mauvaise cible, annonce unique, frontières, poursuite, défaite, gel terminal, projections publiques et rejeu d'un tir visuel avec bots suivi d'une extraction.
+- Voir [la recette M6.1](recette-m6.1.md). Le scénario automatisé de tir/extraction utilise une cible immobile et une escorte éloignée pour isoler le cycle complet ; il ne remplace pas l'équilibrage de la mission normale.
+
+**Suite M6 :** bilan explicatif et relance avec nouvelle graine, puis difficultés, limite de temps éventuelle, deuxième escorte et objectifs secondaires. Le niveau 1 ne clôture pas tout M6.
+
+**Amélioration de recette M6.1 — carte nautique fictive :** remplacement du schéma tactique Capitaine/Armement par une projection métrique uniforme nord en haut, quadrillage latitude/longitude, sous-marin orienté et cercle d'extraction à l'échelle. Zoom borné, glissement souris/tactile, recentrage avec suivi et cadrage extraction ; mêmes coordonnées pour pistes et courses estimées. Pas de nouvelles données ennemies, pas de changement du protocole v14 ni de la règle d'extraction. Le Sonar conserve son affichage polaire ; pincement tactile et fond géographique réel sont hors périmètre. Recette responsive et essai tactile réel à distinguer des tests de géométrie.
 
 ### Contenu
 
