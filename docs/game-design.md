@@ -408,7 +408,7 @@ La configuration d'un tube choisit une source distincte : piste sonar partagée 
 
 La perte de vue ou l'abaissement du périscope n'interdit pas automatiquement le tir visuel : l'âge de l'observation est affiché et les hypothèses continuent d'être extrapolées. Après expiration du contact, une désignation déjà appliquée reste disponible, mais aucune nouvelle désignation ne peut utiliser ce contact expiré. Il n'y a aucune réassociation automatique après perte de vue.
 
-Les modifications du formulaire restent locales jusqu'à « APPLIQUER ESTIMATION ». Chaque application crée une nouvelle révision, remplace l'unique désignation visuelle appliquée et annule les autorisations des tubes visuels précédents. Leur reconfiguration puis une nouvelle autorisation sont obligatoires ; les tubes sonar ne sont pas affectés. Les mesures de conduite de tir sont réservées au Capitaine et à l'Armement, indépendamment du partage informatif P1 vers le Sonar.
+Les modifications du formulaire restent locales jusqu'à « TRANSMETTRE A L'ARMEMENT » (anciennement « APPLIQUER ESTIMATION »). Chaque application crée une nouvelle révision, remplace l'unique désignation visuelle appliquée et annule les autorisations des tubes visuels précédents. Leur reconfiguration puis une nouvelle autorisation sont obligatoires ; les tubes sonar ne sont pas affectés. Les mesures de conduite de tir sont réservées au Capitaine et à l'Armement, indépendamment du partage informatif P1 vers le Sonar.
 
 Télémètre, estimation assistée et association visuel/sonar sont différés. Voir la [recette P3](recette-p3.md).
 
@@ -508,6 +508,8 @@ Le bilan explique la partie au lieu de ne montrer qu'un score : objectifs, navir
 - Les animations restent courtes et désactivables.
 
 ### 8.2 Téléphone
+
+Le poste Capitaine distingue visuellement trois groupes : **Périscope — Observer** (vue, orientation et contacts), **Pilote — Manœuvrer** (consignes du sous-marin) et **Armement — Préparer l'attaque** (hypothèses sur la cible et désignation). Titres, bordures, espacement et teintes d'accent se complètent, sans dépendre de la couleur seule. Les ordres Pilote/Armement sont côte à côte à partir de 960 px et empilés en dessous, sans onglets supplémentaires. Chaque statut reste dans son groupe ; les estimations locales sont séparées de la désignation transmise. Les boutons de transmission nomment explicitement leur destinataire. Le défilement est disponible au tactile et à la molette.
 
 - Portrait et paysage sont supportés ; le paysage est recommandé pour la carte et le sonar.
 - Les panneaux secondaires utilisent des tiroirs ou onglets, pas des fenêtres superposées.

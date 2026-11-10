@@ -16,6 +16,10 @@ Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.
 
 ## Conduite de tir visuelle
 
+Le bouton **POSTE DE COMMANDE**, sous le réglage sonore, ouvre les commandes Périscope, Pilote et Armement. Il devient **REVENIR A LA CARTE** lorsque le panneau est ouvert ; sa largeur est réservée pour maintenir un libellé visible.
+
+L'écran Capitaine sépare les commandes en trois blocs titrés et bordés : **Périscope — Observer**, **Pilote — Manœuvrer** et **Armement — Préparer l'attaque**. Les deux panneaux d'ordres sont côte à côte à partir de 960 px et empilés en dessous. Les hypothèses locales et la désignation transmise sont affichées séparément. Cette réorganisation ne change ni les règles de tir ni le protocole v13 ; la recette visuelle/tactile reste à effectuer.
+
 **P3 : attaque depuis des estimations visuelles manuelles** est implémenté avant M6. Le Capitaine sélectionne un contact au périscope, règle distance/cap/vitesse supposés et applique explicitement sa désignation. L'Armement humain ou bot prépare le tir sans piste sonar ; autorisation et procédure des tubes restent nécessaires. Voir la **[recette P3](recette-p3.md)**. La recette navigateur/téléphone et l'équilibrage restent à confirmer ; télémètre et estimation assistée sont différés.
 
 ## Incréments périscope précédents
