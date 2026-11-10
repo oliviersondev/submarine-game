@@ -2,6 +2,8 @@
 
 Ce guide décrit le poste **Armement** et les commandes associées du **Capitaine** dans le prototype actuel. Les durées et valeurs ci-dessous correspondent à la configuration par défaut.
 
+La voie sonar ci-dessous coexiste avec les [estimations visuelles manuelles P3](recette-p3.md), sans sonar obligatoire. Depuis P4, la carte affiche aussi les courses propres estimées : pointillés et `+` pour l'interception supposée du tube configuré sélectionné, puis `o TOR…` et une traînée pour les torpilles lancées. Les marqueurs `TOR…` ne sont pas les pistes `T…`/`P…`. Les explosions entendues ont un retour sonore désactivable ; les gerbes visibles apparaissent au périscope sans confirmer un naufrage. Voir la [recette P4](recette-p4.md).
+
 ## 1. Le principe
 
 Une attaque se prépare à plusieurs postes :

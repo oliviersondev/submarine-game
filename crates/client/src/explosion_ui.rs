@@ -69,7 +69,7 @@ fn spawn_banner(mut commands: Commands) {
             position_type: PositionType::Absolute,
             top: px(8),
             left: px(8),
-            right: px(8),
+            right: px(76),
             height: px(32),
             padding: UiRect::axes(px(8), px(6)),
             border: UiRect::all(px(1)),

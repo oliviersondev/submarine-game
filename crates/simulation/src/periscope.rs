@@ -18,11 +18,41 @@ pub(crate) struct Periscope {
     contacts: Vec<(Option<usize>, VisualContact)>,
     next_observation: u64,
     next_contact: u64,
+    origin: (f32, f32),
+    contact_origins: std::collections::HashMap<VisualContactId, (f32, f32)>,
 }
 
 impl Periscope {
     pub(crate) fn raised(&self) -> bool {
         self.raised
+    }
+
+    pub(crate) fn observe_explosion(
+        &self,
+        x: f32,
+        y: f32,
+        submarine: &SubmarineState,
+        config: PeriscopeConfig,
+    ) -> Option<shared::GameEvent> {
+        if !self.raised || self.blocked.is_some() {
+            return None;
+        }
+        let config = valid_config(config);
+        let dx = x - submarine.x;
+        let dy = y - submarine.y;
+        let distance = dx.hypot(dy);
+        let bearing = dx.atan2(dy).to_degrees().rem_euclid(360.0);
+        if !distance.is_finite()
+            || distance > config.range
+            || angle_delta(bearing, self.bearing).abs() > config.field_of_view * 0.5
+        {
+            return None;
+        }
+        Some(shared::GameEvent::SurfaceExplosionObserved {
+            bearing,
+            // Stylised 30m surface plume; angular measure only, no world coordinates.
+            angular_size: (2.0 * 15.0_f32.atan2(distance.max(0.1))).to_degrees(),
+        })
     }
 
     pub(crate) fn update(
@@ -35,6 +65,7 @@ impl Periscope {
     ) {
         let config = valid_config(config);
         self.elapsed += f64::from(dt);
+        self.origin = (submarine.x, submarine.y);
         self.blocked = if destroyed {
             Some(PeriscopeBlock::Destroyed)
         } else if !submarine.depth.is_finite()
@@ -103,6 +134,7 @@ impl Periscope {
                 contact.bearing = silhouette.bearing;
                 contact.kind = silhouette.kind;
                 contact.observed_at = self.elapsed;
+                self.contact_origins.insert(contact.id, self.origin);
             } else {
                 // Never reconnect a lost contact using its private vessel identity.
                 *vessel = None;
@@ -111,6 +143,8 @@ impl Periscope {
             contact.old = contact.age >= config.old_after;
         }
         self.contacts.retain(|(_, c)| c.age < config.expires_after);
+        self.contact_origins
+            .retain(|id, _| self.contacts.iter().any(|(_, c)| c.id == *id));
     }
 
     pub(crate) fn command(&mut self, command: PlayerCommand) -> Result<(), ProtocolError> {
@@ -143,6 +177,8 @@ impl Periscope {
                     return Err(ProtocolError::VisualContactLimitReached);
                 }
                 self.next_contact += 1;
+                self.contact_origins
+                    .insert(VisualContactId(self.next_contact), self.origin);
                 self.contacts.push((
                     Some(*index),
                     VisualContact {
@@ -199,6 +235,22 @@ impl Periscope {
             .map(|(_, c)| c.clone())
             .collect()
     }
+
+    pub(crate) fn firing_observation(
+        &self,
+        id: VisualContactId,
+    ) -> Result<(VisualContact, (f32, f32)), ProtocolError> {
+        let contact = self
+            .contacts
+            .iter()
+            .find(|(_, c)| c.id == id)
+            .ok_or(ProtocolError::VisualContactNotFound)?;
+        let origin = self
+            .contact_origins
+            .get(&id)
+            .ok_or(ProtocolError::VisualContactNotFound)?;
+        Ok((contact.1.clone(), *origin))
+    }
 }
 
 fn valid_config(config: PeriscopeConfig) -> PeriscopeConfig {
@@ -235,6 +287,25 @@ pub(crate) fn angle_delta(bearing: f32, origin: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explosion_observation_respects_range_field_wrap_and_automatic_lowering() {
+        let (mut p, w, mut s, c) = scene();
+        raise(&mut p, &w, &s, c);
+        assert!(p.observe_explosion(0.0, c.range, &s, c).is_some());
+        assert!(p.observe_explosion(0.0, c.range + 1.0, &s, c).is_none());
+        assert!(p.observe_explosion(1000.0, 0.0, &s, c).is_none());
+        p.command(PlayerCommand::SetPeriscopeBearing(359.0))
+            .unwrap();
+        assert!(p.observe_explosion(0.0, 1000.0, &s, c).is_some());
+        s.speed = c.max_speed + 1.0;
+        p.update(&w, &s, c, false, 0.0);
+        assert!(p.observe_explosion(0.0, 1000.0, &s, c).is_none());
+        s.speed = 0.0;
+        raise(&mut p, &w, &s, c);
+        p.update(&w, &s, c, true, 0.0);
+        assert!(p.observe_explosion(0.0, 1000.0, &s, c).is_none());
+    }
     fn scene() -> (Periscope, World, SubmarineState, PeriscopeConfig) {
         let mut state = SubmarineState::default();
         state.depth = 12.0;

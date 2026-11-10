@@ -464,8 +464,39 @@ pub enum TubePhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ShotTarget {
+    Sonar(TrackId),
+    /// Revision of the Captain's explicitly applied visual estimate.
+    Visual(u64),
+}
+
+impl std::fmt::Display for ShotTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sonar(id) => write!(f, "P{}", id.0),
+            Self::Visual(revision) => write!(f, "Visuel r{}", revision),
+        }
+    }
+}
+
+/// Player hypotheses anchored to a real observation, not an enemy world position.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct VisualTargetEstimate {
+    pub revision: u64,
+    pub contact: crate::VisualContactId,
+    pub kind: crate::SilhouetteKind,
+    pub bearing: f32,
+    pub observed_at: f64,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub distance: f32,
+    pub heading: f32,
+    pub speed: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShotSettings {
-    pub target: TrackId,
+    pub target: ShotTarget,
     pub depth: f32,
     pub heading_correction: f32,
     pub speed_correction: f32,
@@ -473,6 +504,10 @@ pub struct ShotSettings {
 
 impl ShotSettings {
     pub fn for_target(target: TrackId) -> Self {
+        Self::for_source(ShotTarget::Sonar(target))
+    }
+
+    pub fn for_source(target: ShotTarget) -> Self {
         Self {
             target,
             depth: 4.0,
@@ -495,7 +530,8 @@ pub struct TubeMeasurements {
 pub struct FiringSolution {
     pub bearing: f32,
     pub run_seconds: f32,
-    pub uncertainty_meters: f32,
+    /// None for manual visual estimates: their accuracy cannot be inferred.
+    pub uncertainty_meters: Option<f32>,
     pub warnings: Vec<String>,
     pub launch_allowed: bool,
 }
@@ -503,6 +539,10 @@ pub struct FiringSolution {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TorpedoMeasurements {
     pub id: u64,
+    pub launch_x: f32,
+    pub launch_y: f32,
+    pub elapsed_seconds: f32,
+    pub estimated_intercept_seconds: f32,
     pub x: f32,
     pub y: f32,
     pub depth: f32,
@@ -512,6 +552,8 @@ pub struct TorpedoMeasurements {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeaponsMeasurements {
+    pub visual_target: Option<VisualTargetEstimate>,
+    pub visual_target_age: f32,
     pub tubes: Vec<TubeMeasurements>,
     pub reserve: u8,
     pub solutions: Vec<Option<FiringSolution>>,

@@ -398,6 +398,34 @@ Le calcul traite les vitesses cible/torpille égales ou très proches par une é
 
 L'interface expose la confiance de piste, l'incertitude spatiale et les sources d'instabilité, sans pourcentage de réussite. Elle suit la course estimée des torpilles propres. Une explosion à moins de 6 000 m est observable, sans révéler la position, l'identité ou l'intégrité de la cible ; au-delà, la course estimée reste affichée jusqu'à épuisement prévu de l'autonomie.
 
+#### Conduite de tir visuelle manuelle (P3, implémenté le 6 novembre 2026)
+
+Une attaque peut désormais être préparée **sans aucune piste sonar**. Le partage informatif d'un contact P1 ne suffit pas : le Capitaine sélectionne un contact et applique explicitement une désignation avec ses hypothèses de distance (100 à 30 000 m), cap (0 inclus à 360° exclus) et vitesse (0 à 40 nœuds). Les commandes tactiles ajustent ces valeurs par pas de 100 m, 5° et 1 nœud. Les valeurs initiales du formulaire sont des hypothèses éditables, pas des mesures.
+
+Le serveur capture le dernier relèvement observé, son heure et la position du sous-marin à cette observation. Distance, cap et vitesse restent les estimations du joueur : aucune validation de leur justesse ni correction depuis le monde privé. Elles décrivent la cible à l'heure de l'observation. Le calcul extrapole ensuite un mouvement rectiligne uniforme et tient compte du déplacement propre, sans rafraîchir les paramètres depuis un navire caché. La précision est inconnue, sans pourcentage de réussite ni incertitude numérique fabriquée.
+
+La configuration d'un tube choisit une source distincte : piste sonar partagée ou révision d'estimation visuelle. Les corrections de cap/vitesse M4 s'appliquent aussi aux hypothèses visuelles. La procédure des tubes, la profondeur de tir, le secteur, l'autonomie, l'autorisation et la confirmation humaine restent inchangés. En solo, le bot Armement prépare sur ordre avec ces seules hypothèses et attend l'autorisation du Capitaine ; l'ordre bot est refusé lorsqu'un humain occupe l'Armement.
+
+La perte de vue ou l'abaissement du périscope n'interdit pas automatiquement le tir visuel : l'âge de l'observation est affiché et les hypothèses continuent d'être extrapolées. Après expiration du contact, une désignation déjà appliquée reste disponible, mais aucune nouvelle désignation ne peut utiliser ce contact expiré. Il n'y a aucune réassociation automatique après perte de vue.
+
+Les modifications du formulaire restent locales jusqu'à « TRANSMETTRE A L'ARMEMENT » (anciennement « APPLIQUER ESTIMATION »). Chaque application crée une nouvelle révision, remplace l'unique désignation visuelle appliquée et annule les autorisations des tubes visuels précédents. Leur reconfiguration puis une nouvelle autorisation sont obligatoires ; les tubes sonar ne sont pas affectés. Les mesures de conduite de tir sont réservées au Capitaine et à l'Armement, indépendamment du partage informatif P1 vers le Sonar.
+
+Télémètre, estimation assistée et association visuel/sonar sont différés. Voir la [recette P3](recette-p3.md).
+
+#### Courses estimées et explosions (P4, implémenté le 9 novembre 2026)
+
+La carte du Capitaine et de l'Armement montre en pointillés la course et le point d'interception supposés du **tube sélectionné et configuré**. Il ne s'agit ni d'une cible réelle révélée, ni d'une garantie d'impact. La carte reste orientée au nord, avec un rayon de référence de 10 km ; les distances connues sont représentées linéairement jusqu'à cette limite.
+
+Après lancement, chaque torpille possède un identifiant propre et un symbole accompagné d'une courte traînée sur sa course **estimée**. Le poste Armement/Capitaine affiche le délai supposé jusqu'à interception et l'autonomie restante. Un délai nul ne prouve pas l'impact. L'animation entre snapshots est bornée à 50 ms, sans poursuite inventée pendant une coupure réseau.
+
+Une explosion entendue selon la portée existante de 6 km déclenche un son sourd non directionnel et le bandeau visuel habituel ; les explosions proches de charges conservent leurs propres règles d'écoute. Le bouton **SON ON / MUET** désactive l'audio sans supprimer les informations visuelles ni l'historique. Les explosions reçues ensemble peuvent être regroupées en un seul son pour éviter une saturation ; les événements restent distincts dans l'historique. Aucun point précis d'explosion n'est ajouté à la carte depuis la seule écoute.
+
+Un impact de torpille sur un navire peut produire une gerbe au périscope si celui-ci est effectivement levé, utilisable, orienté vers l'explosion et à portée au moment de l'impact. Les limites de champ/portée du périscope s'appliquent côté serveur. Le Capitaine reçoit seulement un relèvement et une taille apparente, sans identité, position exacte, intégrité ou confirmation de naufrage. La gerbe stylisée s'estompe en deux secondes ; plusieurs gerbes peuvent coexister. Elle n'est ni montrée à travers une vue abaissée ni rejouée lorsque le joueur relève ou rouvre le périscope. Une observation reste consultable dans l'historique du Capitaine.
+
+Un impact hors écoute n'arrête pas la course projetée de la torpille : même une gerbe vue n'est pas automatiquement associée à une torpille. Sans perception, le joueur ne reçoit que la fin de course estimée et la mention **impact non confirmé**. Une gerbe ne nécessite pas qu'un contact visuel ait été créé auparavant. Météo, occultation entre bâtiments et effets de naufrage détaillés restent hors périmètre, comme pour P1.
+
+Voir la [recette P4](recette-p4.md). Le son sur les navigateurs et téléphones réels reste à vérifier, notamment les restrictions d'activation audio du navigateur.
+
 ### 6.8 Tubes et munitions
 
 Base initiale d'équilibrage : quatre tubes avant, un tube arrière et cinq torpilles prêtes ou en réserve. La séquence normale est :
@@ -480,6 +508,8 @@ Le bilan explique la partie au lieu de ne montrer qu'un score : objectifs, navir
 - Les animations restent courtes et désactivables.
 
 ### 8.2 Téléphone
+
+Le poste Capitaine distingue visuellement trois groupes : **Périscope — Observer** (vue, orientation et contacts), **Pilote — Manœuvrer** (consignes du sous-marin) et **Armement — Préparer l'attaque** (hypothèses sur la cible et désignation). Titres, bordures, espacement et teintes d'accent se complètent, sans dépendre de la couleur seule. Les ordres Pilote/Armement sont côte à côte à partir de 960 px et empilés en dessous, sans onglets supplémentaires. Chaque statut reste dans son groupe ; les estimations locales sont séparées de la désignation transmise. Les boutons de transmission nomment explicitement leur destinataire. Le défilement est disponible au tactile et à la molette.
 
 - Portrait et paysage sont supportés ; le paysage est recommandé pour la carte et le sonar.
 - Les panneaux secondaires utilisent des tiroirs ou onglets, pas des fenêtres superposées.

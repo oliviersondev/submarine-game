@@ -1,11 +1,11 @@
 use crate::network::{CommandQueue, GameState, LocalPlayer};
 use bevy::prelude::*;
-use shared::{CrewRole, PlayerCommand, ShotSettings, TrackId, TubePhase};
+use shared::{CrewRole, PlayerCommand, ShotSettings, ShotTarget, TubePhase};
 
 #[derive(Resource)]
-struct WeaponUi {
-    tube: usize,
-    target: Option<TrackId>,
+pub(crate) struct WeaponUi {
+    pub(crate) tube: usize,
+    target: Option<ShotTarget>,
     depth: f32,
     heading: f32,
     speed: f32,
@@ -131,12 +131,12 @@ fn buttons(
                 }
             }
             Action::Target => {
-                let index = tactical
-                    .shared_tracks
+                let targets = available_targets(&tactical.shared_tracks, weapons);
+                let index = targets
                     .iter()
-                    .position(|t| Some(t.id) == ui.target)
-                    .map_or(0, |i| (i + 1) % tactical.shared_tracks.len());
-                ui.target = tactical.shared_tracks.get(index).map(|t| t.id);
+                    .position(|t| Some(*t) == ui.target)
+                    .map_or(0, |i| (i + 1) % targets.len().max(1));
+                ui.target = targets.get(index).copied();
             }
             Action::Field => ui.field = (ui.field + 1) % 3,
             Action::Minus | Action::Plus if role == CrewRole::Weapons => {
@@ -163,7 +163,7 @@ fn buttons(
             }
             Action::Configure => {
                 let Some(target) = ui.target else {
-                    ui.notice = "Choisir une piste partagee".into();
+                    ui.notice = "Choisir une piste sonar ou une designation visuelle".into();
                     continue;
                 };
                 if role == CrewRole::Captain {
@@ -181,11 +181,11 @@ fn buttons(
                 }
                 ui.notice = if role == CrewRole::Captain {
                     format!(
-                        "Ordre de preparation envoye pour P{}. Le bot choisit un tube disponible.",
-                        target.0
+                        "Ordre de preparation envoye pour {}. Le bot choisit un tube disponible.",
+                        target
                     )
                 } else {
-                    format!("Configuration envoyee : P{} vers tube {}. Attendre la confirmation du serveur.", target.0, ui.tube + 1)
+                    format!("Configuration envoyee : {} vers tube {}. Attendre la confirmation du serveur.", target, ui.tube + 1)
                 };
             }
             Action::Prepare if role == CrewRole::Captain => {
@@ -295,11 +295,12 @@ fn update(
         .as_ref()
         .map(|t| t.shared_tracks.as_slice())
         .unwrap_or(&[]);
-    if !tracks.iter().any(|t| Some(t.id) == ui.target) {
+    let targets = available_targets(tracks, weapons);
+    if !targets.iter().any(|t| Some(*t) == ui.target) {
         if let Some(lost) = ui.target {
-            ui.notice = format!("Piste selectionnee P{} perdue ou non partagee. La selection change automatiquement ; la configuration du tube reste inchangee.", lost.0);
+            ui.notice = format!("Source selectionnee {} perdue ou remplacee. La selection change ; la configuration du tube reste inchangee.", lost);
         }
-        ui.target = tracks.first().map(|t| t.id);
+        ui.target = targets.first().copied();
         ui.confirmation = None;
     }
     if ui.confirmation.is_some_and(|(index, settings)| {
@@ -315,10 +316,11 @@ fn update(
     let solution = current_solution
         .map(|s| {
             format!(
-                "Tir {:.0} deg / {:.0}s / +/- {:.0}m\n{}",
+                "Tir {:.0} deg / {:.0}s / {}\n{}",
                 s.bearing,
                 s.run_seconds,
-                s.uncertainty_meters,
+                s.uncertainty_meters
+                    .map_or_else(|| "precision inconnue".into(), |v| format!("+/- {v:.0}m")),
                 s.warnings.join(", ")
             )
         })
@@ -347,6 +349,14 @@ fn update(
         .iter()
         .rev()
         .filter_map(|(tick, event)| match event {
+            shared::GameEvent::SurfaceExplosionObserved { bearing, .. } => Some(format!(
+                "[tick {}] Gerbe observee au periscope / {:.0} deg (navire detruit non confirme)",
+                tick, bearing
+            )),
+            shared::GameEvent::ExplosionHeard => Some(format!(
+                "[tick {}] Explosion entendue / origine non confirmee",
+                tick
+            )),
             shared::GameEvent::TorpedoImpact { torpedo_id } => Some(format!(
                 "[tick {}] Explosion observee / torpille {}",
                 tick, torpedo_id
@@ -364,9 +374,15 @@ fn update(
         .take(6)
         .collect::<Vec<_>>();
     let event = events.into_iter().rev().collect::<Vec<_>>().join("\n");
+    let courses = weapons.torpedoes.iter().map(|t| format!(
+        "TOR{} : interception dans ~{:.0}s / autonomie ~{:.0}s ({:.0}m) / course estimee, impact non garanti",
+        t.id, (t.estimated_intercept_seconds - t.elapsed_seconds).max(0.0),
+        t.remaining_meters / (state.weapons_config.unwrap_or_default().torpedo_speed_knots * 0.514444).max(0.1),
+        t.remaining_meters)).collect::<Vec<_>>().join("\n");
+    let event = format!("{event}\n{courses}");
     let selected = tracks
         .iter()
-        .find(|t| Some(t.id) == ui.target)
+        .find(|t| Some(ShotTarget::Sonar(t.id)) == ui.target)
         .map(|t| {
             format!(
                 "SELECTION : P{} / {:.0} deg / {} / confiance piste {:.0}%\nCible estimee : cap {} / {}",
@@ -378,10 +394,13 @@ fn update(
                 t.speed.map_or("vitesse inconnue".into(), |v| format!("{v:.1} kn"))
             )
         })
-        .unwrap_or_else(|| "Aucune piste partagee".into());
+        .or_else(|| weapons.visual_target.filter(|v| Some(ShotTarget::Visual(v.revision)) == ui.target)
+            .map(|v| format!("SELECTION : Visuel {} / r{} / {}\nObservation {:.1}s / age {:.0}s / relevement {:.0} deg\nEstimations : {:.0}m / cap {:.0} deg / {:.1} kn (non confirmees)",
+                v.contact.0, v.revision, crate::periscope_ui::kind_label(v.kind), v.observed_at, weapons.visual_target_age, v.bearing, v.distance, v.heading, v.speed)))
+        .unwrap_or_else(|| "Aucune source de tir : partager une piste sonar ou appliquer une estimation au periscope".into());
     let guidance = tube_guidance(weapons, tracks, &ui, player.role == Some(CrewRole::Captain));
     let configured = tube.settings.map_or_else(|| "CONFIGURATION APPLIQUEE : aucune cible.".into(), |s|
-        format!("CONFIGURATION APPLIQUEE : P{} / torpille {:.0}m / correction cap {:+.0} deg / vit. {:+.0} kn", s.target.0, s.depth, s.heading_correction, s.speed_correction));
+        format!("CONFIGURATION APPLIQUEE : {} / torpille {:.0}m / correction cap {:+.0} deg / vit. {:+.0} kn", s.target, s.depth, s.heading_correction, s.speed_correction));
     for mut text in &mut status {
         **text = format!("{}\nTUBE {} {} // {} / {:.0}s\nReserve {} / courses suivies {} / autorisation {}\n{}\n{}\n{}\n{}\nDerniere action locale : {}\n{}\nGlisser pour defiler",
             selected,
@@ -393,8 +412,8 @@ fn update(
     for (ActionLabel(action), mut text) in &mut labels {
         **text = match action {
             Action::Target => format!(
-                "Piste {} >",
-                ui.target.map_or("---".into(), |id| id.0.to_string())
+                "Source {} >",
+                ui.target.map_or("---".into(), |id| id.to_string())
             ),
             Action::Tube => format!("Tube {} >", ui.tube + 1),
             Action::Field => field.clone(),
@@ -434,7 +453,7 @@ fn update(
     }
     for (action, mut color) in &mut actions {
         let enabled = match action {
-            Action::Target => !tracks.is_empty(),
+            Action::Target => !targets.is_empty(),
             Action::Tube | Action::Field => true,
             Action::Minus | Action::Plus => !captain,
             Action::Configure if captain => {
@@ -488,6 +507,21 @@ fn pending_configuration(ui: &WeaponUi, applied: Option<ShotSettings>) -> bool {
     }) != applied
 }
 
+fn available_targets(
+    tracks: &[shared::TrackEstimate],
+    weapons: &shared::WeaponsMeasurements,
+) -> Vec<ShotTarget> {
+    tracks
+        .iter()
+        .map(|t| ShotTarget::Sonar(t.id))
+        .chain(
+            weapons
+                .visual_target
+                .map(|v| ShotTarget::Visual(v.revision)),
+        )
+        .collect()
+}
+
 fn tube_guidance(
     weapons: &shared::WeaponsMeasurements,
     tracks: &[shared::TrackEstimate],
@@ -500,21 +534,22 @@ fn tube_guidance(
     let current_solution = weapons.solutions.get(ui.tube).and_then(|s| s.as_ref());
     let mut messages = Vec::new();
     if let Some(settings) = tube.settings {
-        if !tracks.iter().any(|track| track.id == settings.target) {
+        if matches!(settings.target, ShotTarget::Sonar(id) if !tracks.iter().any(|track| track.id == id))
+        {
             let recovery = if captain {
                 "Demander a l'Armement de reconfigurer ce tube, ou donner un nouvel Ordre bot."
             } else {
                 "Choisir une piste partagee puis Configurer."
             };
             messages.push(format!(
-                "TIR BLOQUE : le tube {} vise P{}, piste perdue ou non partagee. {}",
+                "TIR BLOQUE : le tube {} vise {}, piste perdue ou non partagee. {}",
                 ui.tube + 1,
-                settings.target.0,
+                settings.target,
                 recovery
             ));
         }
         if !captain && ui.target != Some(settings.target) {
-            messages.push(format!("SELECTION NON APPLIQUEE : le tube vise toujours P{}. Appuyer sur Configurer pour changer de cible.", settings.target.0));
+            messages.push(format!("SELECTION NON APPLIQUEE : le tube vise toujours {}. Appuyer sur Configurer pour changer de cible.", settings.target));
         } else if !captain && pending_configuration(ui, tube.settings) {
             messages.push("REGLAGES NON APPLIQUES : appuyer sur Configurer avant de tirer (nouvelle autorisation necessaire).".into());
         }
@@ -525,8 +560,8 @@ fn tube_guidance(
         {
             if !matches!(error, shared::ProtocolError::TrackNotShared) {
                 messages.push(format!(
-                    "SOLUTION BLOQUEE POUR P{} : {}",
-                    settings.target.0,
+                    "SOLUTION BLOQUEE POUR {} : {}",
+                    settings.target,
                     crate::render::error_label(error)
                 ));
             }
@@ -574,10 +609,12 @@ fn phase_label(phase: TubePhase) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::{ProtocolError, TubeMeasurements, WeaponsMeasurements};
+    use shared::{ProtocolError, TrackId, TubeMeasurements, WeaponsMeasurements};
 
     fn lost_target() -> WeaponsMeasurements {
         WeaponsMeasurements {
+            visual_target: None,
+            visual_target_age: 0.0,
             tubes: vec![TubeMeasurements {
                 phase: TubePhase::Ready,
                 loaded: true,
@@ -593,10 +630,46 @@ mod tests {
     }
 
     #[test]
+    fn visual_source_works_without_sonar_and_local_changes_suspend_firing() {
+        let mut weapons = lost_target();
+        weapons.visual_target = Some(shared::VisualTargetEstimate {
+            revision: 1,
+            contact: shared::VisualContactId(4),
+            kind: shared::SilhouetteKind::SingleFunnelCargo,
+            bearing: 0.0,
+            observed_at: 0.0,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            distance: 1000.0,
+            heading: 90.0,
+            speed: 8.0,
+        });
+        let target = ShotTarget::Visual(1);
+        assert_eq!(available_targets(&[], &weapons), vec![target]);
+        let settings = ShotSettings::for_source(target);
+        weapons.tubes[0].settings = Some(settings);
+        weapons.solution_errors[0] = None;
+        let mut ui = WeaponUi {
+            target: Some(target),
+            ..default()
+        };
+        assert!(!pending_configuration(&ui, Some(settings)));
+        assert!(!tube_guidance(&weapons, &[], &ui, false).contains("piste perdue"));
+        ui.depth += 1.0;
+        assert!(pending_configuration(&ui, Some(settings)));
+        assert!(tube_guidance(&weapons, &[], &ui, false).contains("REGLAGES NON APPLIQUES"));
+        weapons.visual_target.as_mut().unwrap().revision = 2;
+        assert_eq!(
+            available_targets(&[], &weapons),
+            vec![ShotTarget::Visual(2)]
+        );
+    }
+
+    #[test]
     fn guidance_distinguishes_lost_applied_target_and_unapplied_selection() {
         let weapons = lost_target();
         let ui = WeaponUi {
-            target: Some(TrackId(48)),
+            target: Some(ShotTarget::Sonar(TrackId(48))),
             ..default()
         };
         let text = tube_guidance(&weapons, &[], &ui, false);
@@ -616,7 +689,7 @@ mod tests {
         weapons.tubes[0].phase = TubePhase::Opening;
         weapons.tubes[0].remaining_seconds = 1.4;
         let ui = WeaponUi {
-            target: Some(TrackId(41)),
+            target: Some(ShotTarget::Sonar(TrackId(41))),
             ..default()
         };
         let text = tube_guidance(&weapons, &[], &ui, false);
@@ -635,6 +708,8 @@ mod tests {
         let mut player = LocalPlayer::default();
         player.role = Some(CrewRole::Weapons);
         let empty = WeaponsMeasurements {
+            visual_target: None,
+            visual_target_age: 0.0,
             tubes: vec![],
             reserve: 0,
             solutions: vec![],
