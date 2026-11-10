@@ -1376,6 +1376,7 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
         .with_children(|panel| {
             spawn_combat_status(panel);
             panel.spawn((
+                crate::chart_ui::ChartHeading,
                 Text::new("SITUATION TACTIQUE // PISTES PARTAGEES UNIQUEMENT"),
                 TextFont {
                     font_size: FontSize::Px(16.0),
@@ -1383,6 +1384,7 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
                 },
                 TextColor(Color::srgb(0.55, 0.95, 1.0)),
             ));
+            crate::chart_ui::spawn_feedback_banner(panel);
             panel
                 .spawn((
                     StationBody,
@@ -1954,7 +1956,7 @@ fn update_tactical_station(
     let Some(tactical) = &state.tactical else {
         return;
     };
-    let mut own_state = state
+    let own_state = state
         .submarine
         .as_ref()
         .map(|submarine| {
@@ -1964,16 +1966,6 @@ fn update_tactical_station(
             )
         })
         .unwrap_or_default();
-    if let Some(submarine) = &state.submarine {
-        if let Some(notice) = crate::mission_feedback::extraction_notice(
-            state.mission,
-            submarine.common.x,
-            submarine.common.y,
-        ) {
-            own_state.push_str(notice);
-            own_state.push('\n');
-        }
-    }
     list.0 = if tactical.shared_tracks.is_empty() {
         format!("{own_state}AUCUNE PISTE PARTAGEE")
     } else {

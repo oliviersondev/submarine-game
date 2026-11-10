@@ -18,6 +18,14 @@ pub(crate) struct ChartViewSet;
 #[derive(Component)]
 pub(crate) struct ChartCanvas;
 #[derive(Component)]
+struct ChartRoot;
+#[derive(Component)]
+pub(crate) struct ChartHeading;
+#[derive(Component)]
+struct ExtractionBanner;
+#[derive(Component)]
+struct ExtractionBannerText;
+#[derive(Component)]
 struct Footer;
 #[derive(Component, Clone, Copy)]
 enum Action {
@@ -55,20 +63,115 @@ impl Plugin for ChartUiPlugin {
                 Update,
                 update_view.after(NetworkReceiveSet).in_set(ChartViewSet),
             )
+            .add_systems(
+                Update,
+                update_feedback_banner
+                    .after(NetworkReceiveSet)
+                    .before(ChartViewSet),
+            )
             .add_systems(Update, paint.after(ChartViewSet));
+    }
+}
+
+pub(crate) fn spawn_feedback_banner(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            ExtractionBanner,
+            BackgroundColor(Color::srgb(0.98, 0.68, 0.18)),
+            BorderColor::all(Color::srgb(0.65, 0.39, 0.08)),
+            Node {
+                display: Display::None,
+                width: percent(100),
+                min_height: px(44),
+                flex_shrink: 0.0,
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::axes(px(8), px(6)),
+                border: UiRect::all(px(1)),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_child((
+            ExtractionBannerText,
+            Text::new(""),
+            TextFont {
+                font_size: FontSize::Px(16.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.08, 0.05, 0.01)),
+            Node {
+                width: percent(100),
+                min_width: px(0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ));
+}
+
+fn update_feedback_banner(
+    state: Res<GameState>,
+    mut text: Single<&mut Text, With<ExtractionBannerText>>,
+    mut nodes: Query<
+        (
+            &mut Node,
+            Has<ExtractionBanner>,
+            Has<ChartHeading>,
+            Has<ChartRoot>,
+            Has<ChartCanvas>,
+        ),
+        Or<(
+            With<ExtractionBanner>,
+            With<ChartHeading>,
+            With<ChartRoot>,
+            With<ChartCanvas>,
+        )>,
+    >,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let notice = state.submarine.as_ref().and_then(|sub| {
+        crate::mission_feedback::extraction_notice(state.mission, sub.common.x, sub.common.y)
+    });
+    text.0 = notice
+        .map(|message| message.replace('\n', " / "))
+        .unwrap_or_default();
+    for (mut node, banner, heading, root, canvas) in &mut nodes {
+        if banner {
+            node.display = if notice.is_some() {
+                Display::Flex
+            } else {
+                Display::None
+            };
+        } else if heading {
+            // Replace the heading, rather than stacking another header over a short chart.
+            node.display = if notice.is_some() {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        } else if root {
+            node.min_height = px(if notice.is_some() { 132 } else { 154 });
+        } else if canvas {
+            node.min_height = px(if notice.is_some() { 50 } else { 72 });
+        }
     }
 }
 
 pub(crate) fn spawn(parent: &mut ChildSpawnerCommands) {
     parent
-        .spawn(Node {
-            width: percent(100),
-            flex_grow: 1.0,
-            min_height: px(154),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(4),
-            ..default()
-        })
+        .spawn((
+            ChartRoot,
+            Node {
+                width: percent(100),
+                flex_grow: 1.0,
+                min_height: px(154),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+                ..default()
+            },
+        ))
         .with_children(|root| {
             root.spawn(Node {
                 width: percent(100),
@@ -585,5 +688,95 @@ fn paint(
             node.top = px(position.y);
         }
         *visibility = Visibility::Inherited;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn extraction_feedback_has_a_dedicated_collapsible_banner() {
+        let mut world = World::new();
+        world
+            .run_system_once(|mut commands: Commands| {
+                commands
+                    .spawn(Node::default())
+                    .with_children(spawn_feedback_banner);
+            })
+            .unwrap();
+        let banner = world
+            .query_filtered::<Entity, With<ExtractionBanner>>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(world.get::<Node>(banner).unwrap().display, Display::None);
+        let message = world
+            .query_filtered::<Entity, With<ExtractionBannerText>>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(world.get::<ChildOf>(message).unwrap().parent(), banner);
+        assert_eq!(
+            world.get::<TextFont>(message).unwrap().font_size,
+            FontSize::Px(16.0)
+        );
+        assert_eq!(world.get::<Node>(banner).unwrap().flex_shrink, 0.0);
+
+        let heading = world.spawn((ChartHeading, Node::default())).id();
+        let root = world.spawn((ChartRoot, Node::default())).id();
+        let canvas = world.spawn((ChartCanvas, Node::default())).id();
+        let mut state = GameState::default();
+        state.mission = Some(shared::MissionProgress {
+            briefing: shared::MissionBriefing::level_one(0),
+            phase: shared::MissionPhase::Attack,
+            elapsed_seconds: 0.0,
+        });
+        state.submarine = Some(shared::SubmarineSnapshot {
+            common: shared::CommonMeasurements {
+                x: 0.0,
+                y: -2000.0,
+                heading: 0.0,
+                speed: 0.0,
+                depth: 0.0,
+                dive_state: shared::DiveState::Surface,
+                acoustic_level: shared::AcousticLevel::Low,
+                alerts: vec![],
+                damage: shared::DamageSummary::default(),
+            },
+            pilot: None,
+            engineering: None,
+        });
+        world.insert_resource(state);
+        world.run_system_once(update_feedback_banner).unwrap();
+        assert_eq!(world.get::<Node>(banner).unwrap().display, Display::Flex);
+        assert!(world
+            .get::<Text>(message)
+            .unwrap()
+            .0
+            .contains("MISSION TOUJOURS EN COURS"));
+        assert_eq!(world.get::<Node>(heading).unwrap().display, Display::None);
+        assert_eq!(world.get::<Node>(root).unwrap().min_height, px(132));
+        assert_eq!(world.get::<Node>(canvas).unwrap().min_height, px(50));
+
+        world
+            .resource_mut::<GameState>()
+            .submarine
+            .as_mut()
+            .unwrap()
+            .common
+            .y = 0.0;
+        world.run_system_once(update_feedback_banner).unwrap();
+        assert_eq!(world.get::<Node>(banner).unwrap().display, Display::None);
+        assert!(world.get::<Text>(message).unwrap().0.is_empty());
+        assert_eq!(world.get::<Node>(heading).unwrap().display, Display::Flex);
+        assert_eq!(world.get::<Node>(root).unwrap().min_height, px(154));
+
+        {
+            let mut state = world.resource_mut::<GameState>();
+            state.submarine.as_mut().unwrap().common.y = -2000.0;
+            state.mission.as_mut().unwrap().phase = shared::MissionPhase::Victory;
+        }
+        world.run_system_once(update_feedback_banner).unwrap();
+        assert_eq!(world.get::<Node>(banner).unwrap().display, Display::None);
     }
 }
