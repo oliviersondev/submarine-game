@@ -491,6 +491,8 @@ mod tests {
         let mut sim = Simulation::new();
         // Surface observation must work immediately, without a diving command.
         assert_eq!(sim.state.depth, 0.0);
+        sim.state.x = 150.0;
+        sim.state.y = -200.0;
         sim.apply_command(PlayerCommand::SetPeriscopeRaised(true))
             .unwrap();
         let captain = project_mission(&sim, CrewRole::Captain);
@@ -520,9 +522,29 @@ mod tests {
             1,
         )))
         .unwrap();
+        sim.apply_command(PlayerCommand::SetPeriscopeRaised(false))
+            .unwrap();
+        sim.state.x = 1_000.0;
+        sim.state.y = -1_000.0;
+        sim.tick(0.05);
+        let captain = project_mission(&sim, CrewRole::Captain);
+        assert_eq!(
+            (
+                captain.visual_contacts[0].origin_x,
+                captain.visual_contacts[0].origin_y
+            ),
+            (150.0, -200.0)
+        );
         for role in [CrewRole::Sonar, CrewRole::Weapons] {
             let view = project_mission(&sim, role);
             assert_eq!(view.visual_contacts.len(), 1);
+            assert_eq!(
+                (
+                    view.visual_contacts[0].origin_x,
+                    view.visual_contacts[0].origin_y
+                ),
+                (150.0, -200.0)
+            );
             assert!(view.periscope.is_none());
         }
         for role in [CrewRole::Engineer, CrewRole::Pilot] {

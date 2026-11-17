@@ -1377,7 +1377,7 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
             spawn_combat_status(panel);
             panel.spawn((
                 crate::chart_ui::ChartHeading,
-                Text::new("SITUATION TACTIQUE // PISTES PARTAGEES UNIQUEMENT"),
+                Text::new("SITUATION TACTIQUE // SONAR PARTAGE + VISUEL"),
                 TextFont {
                     font_size: FontSize::Px(16.0),
                     ..default()
@@ -1416,7 +1416,7 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
                     .with_children(|controls| {
                         controls.spawn((
                             TacticalTrackList,
-                            Text::new("AUCUNE PISTE PARTAGEE"),
+                            Text::new("AUCUNE PISTE SONAR PARTAGEE"),
                             TextFont {
                                 font_size: FontSize::Px(12.0),
                                 ..default()
@@ -1967,7 +1967,7 @@ fn update_tactical_station(
         })
         .unwrap_or_default();
     list.0 = if tactical.shared_tracks.is_empty() {
-        format!("{own_state}AUCUNE PISTE PARTAGEE")
+        format!("{own_state}AUCUNE PISTE SONAR PARTAGEE")
     } else {
         let tracks = tactical
             .shared_tracks

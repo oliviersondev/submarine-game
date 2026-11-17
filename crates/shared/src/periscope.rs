@@ -116,6 +116,9 @@ pub struct VisualContact {
     pub age: f32,
     pub old: bool,
     pub shared: bool,
+    /// Own submarine position when this bearing was observed, never an enemy position.
+    pub origin_x: f32,
+    pub origin_y: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -318,6 +318,7 @@ pub(crate) fn spawn(parent: &mut ChildSpawnerCommands) {
                     }
                 }
                 crate::torpedo_ui::spawn(map);
+                crate::visual_chart_ui::spawn(map);
             });
             root.spawn((
                 Footer,
@@ -402,7 +403,13 @@ fn update_view(
     }
 }
 
-fn set_line(node: &mut Node, transform: &mut UiTransform, a: Vec2, b: Vec2, thickness: f32) {
+pub(crate) fn set_line(
+    node: &mut Node,
+    transform: &mut UiTransform,
+    a: Vec2,
+    b: Vec2,
+    thickness: f32,
+) {
     let delta = b - a;
     let center = (a + b) * 0.5;
     node.left = px(center.x - delta.length() * 0.5);
@@ -442,6 +449,11 @@ fn paint(
         return;
     };
     let own = Vec2::new(sub.common.x, sub.common.y);
+    let visual_estimate_visible = state
+        .weapons
+        .as_ref()
+        .and_then(crate::visual_chart::applied_position)
+        .is_some_and(|position| view.contains(view.project(position)));
     let extraction_waiting =
         crate::mission_feedback::extraction_notice(state.mission, own.x, own.y).is_some();
     let scale = view.scale();
@@ -556,8 +568,16 @@ fn paint(
                         background.0 = Color::srgb(0.35, 0.80, 0.95);
                         transform.rotation = Rot2::degrees(sub.common.heading);
                     } else {
+                        if visual_estimate_visible && view.size.y < 120.0 {
+                            continue;
+                        }
                         text.0 = "SOUS-MARIN".into();
-                        position = point + Vec2::new(16.0, 18.0);
+                        position = point
+                            + if visual_estimate_visible {
+                                Vec2::new(-82.0, -30.0)
+                            } else {
+                                Vec2::new(16.0, 18.0)
+                            };
                     }
                 }
             }
@@ -585,15 +605,29 @@ fn paint(
                     if !view.contains(center) {
                         continue;
                     }
+                    if visual_estimate_visible && view.size.y < 80.0 {
+                        continue;
+                    }
                     text.0 = format!(
                         "EXTRACTION\nR {:.0} m / {:.0} m",
                         zone.radius,
                         own.distance(Vec2::new(zone.x, zone.y))
                     );
-                    position = Vec2::new(
-                        (center.x + radius + 6.0).min((view.size.x - 120.0).max(4.0)),
-                        (center.y + 5.0).min((view.size.y - 28.0).max(0.0)),
-                    );
+                    position = if visual_estimate_visible {
+                        Vec2::new(
+                            (center.x - radius - 126.0).clamp(4.0, (view.size.x - 124.0).max(4.0)),
+                            if view.size.y < 120.0 {
+                                (center.y - 20.0).clamp(32.0, (view.size.y - 50.0).max(32.0))
+                            } else {
+                                center.y.min((view.size.y - 28.0).max(0.0))
+                            },
+                        )
+                    } else {
+                        Vec2::new(
+                            (center.x + radius + 6.0).min((view.size.x - 120.0).max(4.0)),
+                            (center.y + 5.0).min((view.size.y - 28.0).max(0.0)),
+                        )
+                    };
                 }
             }
             Mark::ScaleLine | Mark::ScaleLabel => {

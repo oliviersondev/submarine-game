@@ -17,6 +17,8 @@ mod render;
 mod role;
 mod silhouette;
 mod torpedo_ui;
+mod visual_chart;
+mod visual_chart_ui;
 mod weapons_ui;
 
 fn main() {
@@ -43,5 +45,6 @@ fn main() {
         .add_plugins(periscope_ui::PeriscopeUiPlugin)
         .add_plugins(mission_ui::MissionUiPlugin)
         .add_plugins(chart_ui::ChartUiPlugin)
+        .add_plugins(visual_chart_ui::VisualChartUiPlugin)
         .run();
 }

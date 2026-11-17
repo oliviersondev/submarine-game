@@ -28,7 +28,7 @@ Chaque joueur peut se déclarer prêt. Un joueur démarre explicitement la missi
 
 **Mission niveau 1 (M6.1) :** identifier le cargo décrit au briefing parmi deux silhouettes différentes, le détruire puis rejoindre vivant l'extraction indiquée sur la carte, même sous poursuite d'une escorte. L'objectif détruit est annoncé immédiatement ; une erreur de cible reste possible. La perte du sous-marin ou la fuite de la cible termine la mission. Voir la [recette M6.1](docs/recette-m6.1.md). Le résultat est minimal ; pour rejouer, recharger et créer une nouvelle salle.
 
-La carte Capitaine/Armement affiche un secteur nautique fictif avec latitude/longitude, sous-marin orienté et cercle d'extraction à l'échelle. Zoom : **− / +** ou molette ; déplacement : glisser ; **RECENTRER** suit le sous-marin ; **EXTRACTION** cadre sa zone. Les pistes et courses restent estimées, sans positions ennemies réelles.
+La carte Capitaine/Armement affiche un secteur nautique fictif avec latitude/longitude, sous-marin orienté et cercle d'extraction à l'échelle. Zoom : **− / +** ou molette ; déplacement : glisser ; **RECENTRER** suit le sous-marin ; **EXTRACTION** cadre sa zone. Sonar : marqueurs jaunes `P… EST.` ; visuel : relèvements et marqueur cyan `V… EST.` après transmission des hypothèses à l'Armement. L'âge et l'état ancien sont affichés ; une nouvelle observation ne corrige pas automatiquement l'estimation transmise. Les pistes et courses restent estimées, sans positions ennemies réelles.
 
 **En solo, le joueur doit être Capitaine** et les quatre autres postes sont des bots. Les autres rôles humains restent possibles en multijoueur.
 
@@ -148,7 +148,7 @@ make clean         # supprime target/ + dist/ + .trunk/
 
 Tous les messages sont sérialisés en binaire avec `postcard` sur WebSocket.
 
-Chaque enveloppe porte `version: u16` (actuellement **`14`**, source de vérité : `crates/shared/src/protocol.rs`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit l'armement ; v7 les pings ennemis ; v8 les dégâts ; v9 le contrôle des avaries ; v10 le périscope ; v11 les vigies ; v12 la conduite de tir visuelle ; v13 les courses estimées et explosions observées. **v14 ajoute le briefing au lobby, la progression de mission aux snapshots, l'annonce d'objectif détruit et le refus après résultat.** Serveur et client doivent être mis à jour ensemble ; v14 est incompatible avec v13.
+Chaque enveloppe porte `version: u16` (actuellement **`15`**, source de vérité : `crates/shared/src/protocol.rs`). `RoomId`, `SessionId`, `PlayerId`, `CommandId`, `TrackId` et `VisualContactId` sont des types opaques. Les commandes sont séparées entre lobby et mission. Les versions 4 à 6 ont introduit l'armement ; v7 les pings ennemis ; v8 les dégâts ; v9 le contrôle des avaries ; v10 le périscope ; v11 les vigies ; v12 la conduite de tir visuelle ; v13 les courses estimées et explosions observées ; v14 la progression de mission et le briefing. **v15 ajoute la position propre à l'observation dans les contacts visuels, pour ancrer correctement leurs relèvements sur la carte.** Aucune position ennemie réelle n'est ajoutée. Serveur et client doivent être mis à jour ensemble ; v15 est incompatible avec v14.
 
 ### Client → Serveur (`ClientPayload`)
 

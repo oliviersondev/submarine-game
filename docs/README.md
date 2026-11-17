@@ -14,7 +14,7 @@ Pour valider la récupération après une attaque : **[Recette M5.3](recette-m5.
 
 La première boucle complète est implémentée : **deux cargos aux profils distincts et une escorte**, briefing illustré, identification manuelle, destruction du cargo prioritaire puis extraction fixe. L'objectif détruit est annoncé immédiatement ; les autres naufrages restent non confirmés. La perte du sous-marin ou la sortie du cargo cible termine la mission en défaite. Le résultat arrête la simulation ; bilan détaillé et relance dans la même salle restent différés. Voir la **[recette M6.1](recette-m6.1.md)** ; recette navigateur/téléphone et équilibrage en conditions normales restent à confirmer.
 
-La carte Capitaine/Armement devient une **carte nautique fictive** : grille latitude/longitude, échelle uniforme, sous-marin orienté, cercle d'extraction à l'échelle, zoom, déplacement et recentrage. Les pistes restent estimées ; les relèvements sans distance ne deviennent pas des positions. Ce rendu reste en protocole v14. Voir la section cartographie de la recette M6.1.
+La carte Capitaine/Armement devient une **carte nautique fictive** : grille latitude/longitude, échelle uniforme, sous-marin orienté, cercle d'extraction à l'échelle, zoom, déplacement et recentrage. Elle distingue maintenant **sonar jaune `P… EST.` et visuel cyan `V…`** : relèvement observé sans distance inventée, puis estimation manuelle extrapolée uniquement après transmission à l'Armement, avec âge et mention ancien. **Protocole v15, incompatible v14** : les contacts visuels portent la position propre à l'observation, jamais la position réelle du bateau. Redémarrer serveur et client ensemble. Voir les sections cartographie et contacts visuels de la recette M6.1.
 
 ## Courses de torpilles et explosions
 

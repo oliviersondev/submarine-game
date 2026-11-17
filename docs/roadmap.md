@@ -398,6 +398,8 @@ Les valeurs initiales sont des paramètres d'équilibrage centralisés dans `Per
 
 **Amélioration de recette M6.1 — carte nautique fictive :** remplacement du schéma tactique Capitaine/Armement par une projection métrique uniforme nord en haut, quadrillage latitude/longitude, sous-marin orienté et cercle d'extraction à l'échelle. Zoom borné, glissement souris/tactile, recentrage avec suivi et cadrage extraction ; mêmes coordonnées pour pistes et courses estimées. Pas de nouvelles données ennemies, pas de changement du protocole v14 ni de la règle d'extraction. Le Sonar conserve son affichage polaire ; pincement tactile et fond géographique réel sont hors périmètre. Recette responsive et essai tactile réel à distinguer des tests de géométrie.
 
+**Suivi du 17 novembre 2026 — contacts visuels cartographiés :** relèvements cyan ancrés à la position propre lors de l'observation, sans distance inventée ; marqueur `V… EST. r…` uniquement depuis la désignation transmise à l'Armement, extrapolation des seules hypothèses, âge et état ancien, maintien après expiration du contact. Une nouvelle observation ne corrige pas automatiquement l'estimation appliquée ; aucun lien automatique avec le sonar. Protocole v15 pour les origines propres des contacts, sans nouvelle commande ni vérité ennemie. Voir la recette M6.1 ; téléphone réel et équilibrage restent à confirmer.
+
 ### Contenu
 
 - Briefing et configuration de difficulté.

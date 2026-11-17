@@ -533,7 +533,11 @@ La carte tactique utilise une projection locale nord en haut, avec **la même é
 - Le déplacement/zoom ne commande jamais le sous-marin. La conversion écran/monde est commune aux pistes, courses estimées, prévisions et extraction ; les objets hors champ sont masqués ou découpés, pas collés artificiellement au bord.
 - Les pistes partagées à distance connue sont marquées **EST.**, avec une zone d'incertitude indicative issue des seules incertitudes reçues. Sans distance connue, seul un relèvement est tracé avec « DIST. ? », sans inventer de position. L'affichage polaire propre au Sonar reste distinct.
 
-Le changement est uniquement client et ne modifie ni le protocole v14, ni la visibilité des ennemis, ni les conditions d'extraction. Pas de zoom par pincement pour ce premier incrément : les boutons tactiles restent disponibles.
+Le fond nautique est calculé localement et ne change ni la visibilité des ennemis ni les conditions d'extraction. Pas de zoom par pincement pour ce premier incrément : les boutons tactiles restent disponibles.
+
+**Complément visuel (17 novembre 2026, protocole v15) :** les contacts créés au périscope apparaissent en cyan sur la carte Capitaine ; le poste Armement reçoit leurs relèvements après partage explicite. `V… OBS.` est uniquement une ligne depuis la position propre à l'observation, accompagnée de l'âge et de « DIST. ? ». L'origine, le relèvement et l'heure restent figés après perte de vue ; aucun déplacement propre ultérieur ne translate artificiellement cette mesure. À expiration du contact, le relèvement disparaît.
+
+Le marqueur creux **`V… EST. r…`** apparaît seulement après **TRANSMETTRE A L'ARMEMENT**. Il extrapole la distance/cap/vitesse supposés depuis l'observation datée, jamais la position ou la route réelles du cargo. Il porte l'âge, « hypothèses manuelles » et, dès 30 s par défaut, « ANCIEN » avec une couleur atténuée. La fraîcheur d'une nouvelle observation ne rajeunit pas une ancienne désignation : la retransmission est volontaire. Une désignation déjà appliquée reste affichable après expiration du contact, tant qu'elle n'est pas remplacée. Les réglages locaux non appliqués ne déplacent pas le marqueur. Sonar jaune `P… EST.` et visuel cyan `V…` restent indépendants, sans association ni fusion automatique. L'âge et les hypothèses ne constituent pas une précision connue ni une validation de bonne cible.
 
 ### 8.2 Téléphone
 

@@ -299,6 +299,14 @@ La confirmation de destruction du cargo objectif est une **exception produit exp
 
 **Évolution cartographique :** `client/src/chart.rs` possède la projection métrique uniforme, son inverse, le zoom borné, le déplacement, le découpage de segments et la conversion vers des coordonnées fictives autour de 48° N / 10° O. `chart_ui.rs` affiche quadrillage, sous-marin orienté, cercle d'extraction, limites publiques, pistes estimées et commandes tactiles. La ressource locale `ChartView` conserve centre, demi-portée, dimensions logiques et mode de suivi ; elle est mise à jour après réception réseau, avant le dessin de la carte et de `torpedo_ui.rs`, qui partage exactement cette projection. L'extraction n'est plus rendue séparément par `mission_ui.rs`. Le rapport de pixels par mètre dépend du petit axe de la vue, jamais de deux pourcentages indépendants. Le Sonar garde sa représentation polaire. Aucun état ennemi privé ni nouveau message réseau n'est nécessaire.
 
+### 5.10 Contacts visuels sur la carte
+
+Le protocole **v15, incompatible v14**, ajoute `origin_x` et `origin_y` à `VisualContact` : il s'agit exclusivement de la position du sous-marin au moment du relèvement. `periscope.rs` actualise relèvement, origine et heure pendant la visibilité continue, puis les fige ensemble à la perte de vue. La même origine sert à la désignation visuelle et au dessin du relèvement. Les champs propres au navire ennemi restent privés ; les permissions et le partage explicite sont inchangés : tous les contacts pour le Capitaine, uniquement ceux partagés pour Sonar/Armement, aucun pour Pilote/Ingénierie.
+
+`client/src/visual_chart.rs` calcule, depuis les seules hypothèses transmises de `WeaponsMeasurements::visual_target`, une position extrapolée selon le même cap/vitesse/âge que la conduite de tir (sans corrections propres à un tube). Il ne lit ni formulaire local ni piste sonar. `visual_chart_ui.rs` utilise la projection `ChartView` commune pour dessiner les relèvements `V… OBS.` sans distance et le marqueur cyan creux `V… EST. r…`, avec âge et mention « hypothèses manuelles ». Le pool est borné aux 64 contacts maximum. Les pistes sonar restent jaunes, sans fusion ni association automatique.
+
+La désignation appliquée persiste après expiration du contact ; le marqueur fait de même, extrapolé uniquement depuis l'observation figée et les hypothèses originales. Une nouvelle observation peut actualiser le relèvement mais ne rafraîchit ni le marqueur ni son âge. La mention « ANCIEN » et une teinte atténuée utilisent `PeriscopeConfig::old_after` (30 s par défaut). Seule une nouvelle transmission explicite remplace l'estimation. Un marqueur hors champ est masqué ; aucun point d'interception, impact ou naufrage n'est confirmé par cet affichage. Les fixtures v15 couvrent aussi la forme du contact et son origine propre.
+
 ## 6. Vue d'exécution
 
 ### 6.1 Connexion et démarrage cible
