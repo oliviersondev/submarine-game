@@ -115,6 +115,7 @@ impl RoomRegistry {
     fn snapshot(&self, room_id: &RoomId) -> Option<LobbySnapshot> {
         let room = self.rooms.get(room_id)?;
         Some(LobbySnapshot {
+            briefing: shared::MissionBriefing::level_one(room.config.seed),
             room_id: room_id.clone(),
             phase: room.phase,
             slots: CrewRole::ALL

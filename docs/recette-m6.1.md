@@ -1,0 +1,76 @@
+# Recette M6.1 — Mission niveau 1
+
+## Préparation
+
+- Vérifier `make check-all`, `make test` et `cargo check -p client --target wasm32-unknown-unknown --tests`.
+- Redémarrer le serveur après mise à jour : protocole **v15**, incompatible v14 (origines propres des contacts visuels). Lancer `make server` et `make client` dans deux terminaux.
+- Tester navigateur ordinateur et téléphone réel, notamment 360 × 640. Lancer en Capitaine (`?role=captain`), créer une salle ; les quatre autres postes seront bots.
+- Les étapes de recette ci-dessous sont une procédure ; seuls les contrôles explicitement listés dans la vérification partielle ont été réalisés.
+
+### Vérification partielle du 10 novembre 2026
+
+- `make test` : 152 tests natifs réussis (28 serveur, 12 shared, 112 simulation), dont un scénario de tir visuel avec bot Armement puis navigation vers l'extraction, rejoué à l'identique dans une scène contrôlée.
+- `make check-all` et compilation des tests client pour WASM réussis. Les tests client ne sont pas exécutés par `make test`.
+- Chrome headless/WebGL2 avec serveur de test v14 séparé : briefing aux deux profils, fermeture/réouverture, défilement à la molette, prêt/démarrage, phase attaque et repère d'extraction vérifiés à 360 × 640 ; carte également vérifiée à 1280 × 720. Pas d'erreur d'exécution JavaScript/WASM observée. Les boutons de mission disposent d'une zone réservée hors télémétrie.
+- Correction des proportions du briefing : les deux profils ont été revérifiés dans Chrome à 360 × 640, 640 × 360 et 1885 × 720, puis au retour en portrait. Le dessin conserve un rapport 140:24, reste centré et limite sa largeur à 350 px, sans étirement du navire. Vérifications WASM et 152 tests natifs toujours réussis ; le nouveau test de configuration du dessin est compilé pour WASM, pas exécuté par `make test`.
+- Correction du recouvrement du bouton **PRET** sur grand écran : les commandes du lobby commencent sous la ligne de briefing. Visibilité des boutons et retour après redimensionnement vérifiés à 1885 × 720, 360 × 640 et 640 × 360 ; un clic sur **PRET** donne bien « HUMAIN PRET ». Compilation WASM, y compris du test de non-recouvrement, réussie.
+- Carte nautique fictive : grille et coordonnées, cercle d'extraction rond, boutons de cadrage/zoom/recentrage, zoom à la molette et glissement souris vérifiés dans Chrome à 1280 × 900. Sous-marin orienté vérifié pendant une manœuvre réelle. Formats 360 × 640 et 640 × 360 vérifiés ; glissement tactile et bouton **EXTRACTION** également essayés par événements tactiles émulés. Pas d'exception JavaScript/WASM observée. Quatre tests de géométrie de `chart.rs` exécutés dans un harness temporaire Bevy minimal sans audio : projection uniforme/inverse, limites du zoom/déplacement, coordonnées et découpage. La compilation des tests client reste distincte de leur exécution complète. Course de torpille sur la nouvelle carte, poste Armement humain et téléphone physique restent à recetter.
+- Lisibilité du retour d'extraction : bandeau ambre dédié en 16 px, vérifié dans Chrome à 1280 × 900, 360 × 640 et 640 × 360 avec des snapshots de recette projetés par le code serveur puis injectés uniquement dans le navigateur de test. Le message entier reste lisible, sans recouvrement des boutons ; à la sortie, le bandeau se replie et le titre tactique revient. Aucun message dupliqué dans les mesures. Les deux tests ciblés de condition restent réussis ; le test UI de présence/repli/restauration est compilé pour WASM. Cela ne remplace pas un nouveau parcours de navigation complet ni l'essai sur téléphone physique.
+- Contacts visuels v15 : 153 tests natifs de référence réussis, dont origine propre des observations figée après perte et projection par rôle, plus 12 tests client ciblés exécutés dans un harness Bevy minimal sans audio/réseau réel. Ils couvrent notamment relèvement seul, création du marqueur depuis la désignation appliquée, extrapolation, vieillissement, maintien après expiration et absence de déplacement depuis une nouvelle observation seule. `make check-all` et compilation des tests WASM réussis. Les tests client ciblés ne remplacent pas l'exécution complète du client ni la recette sur téléphone réel.
+- Non validés par cette vérification : mission complète dans le navigateur, résultat après combat réel, cinq humains, toucher sur téléphone physique, lisibilité des navires à distance réelle et équilibrage normal. Les étapes ci-dessous restent la recette complète à effectuer.
+
+## Briefing et reconnaissance
+
+1. Vérifier l'ouverture du briefing au lobby, sa description et le profil dessiné, la composition « 2 cargos + 1 escorte », l'extraction X 0 / Y −2 000 m / rayon 500 m et la limite ±7 000 m.
+2. Fermer, se déclarer prêt et démarrer. Rouvrir avec **MISSION / BRIEFING**. Vérifier fermeture, défilement tactile/molette et accès au dernier bouton sans clavier.
+   Briefing fermé, vérifier sur grand écran que **PRET** et **DEMARRER** sont visibles et cliquables sous **MISSION / BRIEFING**, sans recouvrement. Refaire après passage portrait/paysage et retour au grand écran.
+   Redimensionner en portrait, paysage et grand écran : le profil doit rester centré et conserver ses proportions (140:24), sans s'étirer avec la largeur du bandeau. Vérifier les deux cargos ; seule la taille uniforme du dessin peut changer.
+3. Au périscope, observer les deux cargos : château arrière/une cheminée/deux grands mâts contre château central/deux cheminées/mâts courts. Comparer au dessin du briefing et sous plusieurs angles. Il est normal qu'ils soient difficiles à identifier de face ou de très loin ; noter la distance de reconnaissance sur téléphone.
+4. Désigner volontairement le mauvais cargo : aucun indicateur ne doit valider ou invalider l'identité de l'objectif. Les accusés de commande peuvent confirmer l'application des hypothèses, pas leur justesse.
+
+## Objectif et extraction
+
+1. Suivre le [guide armement](guide-armement.md), préparer et autoriser le tir contre la cible du briefing.
+2. Après sa destruction, vérifier l'annonce immédiate **OBJECTIF DETRUIT / REJOIGNEZ L'EXTRACTION**. L'annonce est permise même périscope abaissé et hors écoute ; elle ne corrige pas les pistes ou les courses estimées.
+3. Fermer/réouvrir le briefing : la phase extraction doit rester présente. Vérifier le repère vert, distance et rayon sur la carte Capitaine/Armement.
+4. Ordonner au bot Pilote une route vers X 0 / Y −2 000 m, sans dépasser la zone. Entrer dans le rayon de 500 m : victoire même si l'escorte poursuit encore.
+5. Vérifier écran de victoire, durée, coque restante, physique figée et refus des nouvelles commandes. Fermer/réouvrir le panneau ne relance pas la partie.
+
+## Carte nautique fictive
+
+1. Fermer le briefing et le poste de commande. Vérifier la carte nord en haut, les graduations latitude/longitude, la mention **SECTEUR FICTIF**, les coordonnées propres et une barre d'échelle en MN/mètres. Au départ X/Y = 0/0 correspond à 48°00.00' N / 10°00.00' O, affiché `48d00.00'N / 10d00.00'O` (`d` = degrés, pour compatibilité avec la police du client) ; ce n'est pas une zone géographique réelle à reconnaître.
+2. Vérifier la présence du sous-marin bleu, vu de dessus, avec une ligne vers l'avant. Ordonner un changement de cap au Pilote : l'icône doit suivre le cap réel, pas sa consigne instantanément. Sa taille reste symbolique et lisible.
+3. Vérifier le cercle vert d'extraction et son rayon de 500 m. Appuyer sur **EXTRACTION** pour le cadrer : un vrai cercle doit apparaître, pas une ellipse sur un écran large. La distance reste calculée depuis le sous-marin, même en vue libre. Le carré d'opération est une limite publique, pas une détection ennemie.
+4. Tester **+**, **−**, et la molette au-dessus de la carte. Le cercle, la grille, les pistes et les courses changent ensemble d'échelle. Aux limites du zoom, l'affichage reste fini et stable. Sur téléphone, utiliser les boutons (pas de pincement requis).
+5. Glisser la carte avec la souris, puis au toucher : la mention **VUE LIBRE** apparaît. Le sous-marin ne reçoit aucun ordre de navigation. Continuer à naviguer : la carte ne doit pas se recoller au sous-marin. **RECENTRER** le replace au centre et réactive le suivi, en conservant le zoom.
+6. Panoramique/zoom pendant une course de torpille : pistes, trajet prévu, interception supposée et torpilles restent dans le même repère. Un objet hors champ disparaît plutôt que d'être collé à un bord. Les pistes ont la mention **EST.** ; un relèvement sans distance porte **DIST. ?**, sans position inventée.
+7. Passer de 360 × 640 à 640 × 360 puis grand écran et revenir. Vérifier cercle toujours rond, échelle cohérente, boutons accessibles, grille non étirée et position géographique stable du centre en vue libre. Les zooms ne doivent pas agir derrière le briefing ou le panneau périscope, ni lorsque la molette est au-dessus des commandes d'armement.
+8. En multijoueur, vérifier la carte au poste Armement et l'absence de régression de la vue polaire Sonar. Ces manipulations restent locales au client ; elles ne changent ni les estimations reçues ni la mission.
+
+## Contacts visuels sur la carte — sans sonar obligatoire
+
+**Vérification partielle du 17 novembre 2026 :** 153 tests `shared`/`simulation`/`server` réussis, y compris origine propre figée après perte de vue, permissions et fixtures v15. Douze tests ciblés client exécutés dans un harness Bevy minimal sans audio (géométrie, projections visuelles, cycle du marqueur et feedback de mission) ; les tests client complets sont également compilés pour WASM. Chrome avec serveur v15 de test séparé et snapshots issus de scénarios de simulation contrôlés : relèvement sans marqueur avant transmission, marqueur manuel après transmission, observation récente à 0 s sans rajeunissement de l'estimation à 40 s, maintien après expiration à 120 s et remplacement explicite par une nouvelle révision. Rendus 1280 × 900, 360 × 640 et 640 × 360 vérifiés, sans erreur d'exécution pendant cette vérification. Partie complète avec ces marqueurs, poste Armement humain et téléphone physique restent à recetter.
+
+1. Créer un contact au périscope puis revenir à la carte sans transmettre d'estimation. Vérifier une ligne cyan **V… OBS. / âge / DIST. ?** : aucun bateau placé à une distance arbitraire, aucun marqueur `V… EST.`. La carte peut indiquer « AUCUNE PISTE SONAR PARTAGEE » sans masquer ces informations visuelles.
+2. Modifier distance/cap/vitesse locaux sans transmission : aucun marqueur estimé ne doit être créé ou déplacé par ces réglages. Appuyer sur **TRANSMETTRE A L'ARMEMENT** : un losange creux cyan **V… EST. r…**, âge et **HYPOTHESES MANUELLES** apparaît depuis la désignation appliquée, sans ordre de préparation ou tir nécessaire. Ajuster zoom/cadrage si la position supposée est hors champ.
+3. Attendre sans retransmettre : le marqueur avance selon le cap et la vitesse supposés, même si la vraie cible manœuvre autrement. Après 30 s par défaut, il est atténué et marqué **ANCIEN**. Une mauvaise hypothèse peut donc donner une mauvaise position : ce n'est pas une confirmation serveur.
+4. Observer à nouveau le même contact : le relèvement peut être récent alors que le marqueur reste fondé sur l'ancienne désignation et garde son âge. Seule une nouvelle transmission change sa révision et le replace selon les nouvelles hypothèses. Une modification locale seule ne le fait pas.
+5. Abaisser le périscope puis manœuvrer le sous-marin : le relèvement perdu reste ancré à la position propre de sa dernière observation, et non au sous-marin actuel. À expiration du contact (120 s par défaut), sa ligne disparaît mais la désignation déjà appliquée reste extrapolée et marquée ancienne.
+6. Tester zoom et déplacement : les observations et estimations utilisent le même repère que les torpilles, l'extraction et les pistes sonar. Un marqueur hors champ est masqué, pas collé au bord. Aucun naufrage, bonne cible ou position réelle n'est confirmé par son affichage.
+   Sur les petites cartes, vérifier les libellés abrégés **HYP. MANUELLES** / **ANCIEN / HYP. MAN.**, distincts du relèvement observé ; dans une vue très courte, la ligne de relèvement reste visible même si son libellé est masqué pour éviter le recouvrement avec l'estimation.
+7. En multijoueur, partager un contact : l'Armement reçoit le relèvement informatif ; une désignation transmise lui donne le marqueur estimé même sans piste sonar. Pilote/Ingénierie ne reçoivent pas ces données. Vérifier que les pistes sonar jaunes **P… EST.** et les contacts visuels cyan **V…** restent distincts, même si leurs positions supposées se ressemblent.
+8. Refaire à 360 × 640, en paysage et sur téléphone physique : âge, état ancien et mention des hypothèses lisibles ; aucun blocage des boutons, du glissement ou du zoom.
+
+## Erreurs et défaites (nouvelles salles)
+
+- Couler l'autre cargo : aucun accomplissement d'objectif, aucune confirmation automatique de ce naufrage. Les perceptions d'explosion restent possibles. Rejoindre l'extraction ne donne pas la victoire.
+- Entrer dans l'extraction avant d'avoir détruit la cible : cercle ambre et **bandeau ambre dédié au-dessus de la carte**, en caractères agrandis : **ZONE D'EXTRACTION ATTEINTE / OBJECTIF PRINCIPAL NON ACCOMPLI / MISSION TOUJOURS EN COURS**. Il remplace temporairement le titre tactique, sans recouvrir les boutons ; le message n'est plus mêlé aux mesures. Vérifier sa lisibilité sur ordinateur, portrait et paysage. Il persiste à l'arrêt et en vue libre, sans bloquer les commandes ; sortir du rayon de 500 m le fait disparaître, rétablit le titre et remet le cercle en vert. Aucun écran de résultat n'apparaît. Après accomplissement de l'objectif ou fin de mission, ce message ne doit pas contredire le nouvel état.
+- Laisser le cargo prioritaire vivant sortir du carré de ±7 000 m : **DEFAITE / CARGO CIBLE ECHAPPE**, état figé. Les cargos ne font plus demi-tour sur la frontière.
+- Provoquer la perte du sous-marin avant ou après destruction de la cible : **DEFAITE / SOUS-MARIN PERDU**, état figé, commandes refusées.
+- Recharger la page puis créer une nouvelle salle : nouveau briefing correspondant à la nouvelle graine. Aucune relance dans la même salle n'est promise.
+
+## Multijoueur et informations
+
+- Vérifier briefing et résultat aux cinq postes, conservation des commandes de chacun, absence d'ordre bot sur un poste humain.
+- Aucun profil ne porte de badge « bonne cible » au périscope ; aucune position ennemie exacte, intégrité, résultat des autres naufrages ou état de poursuite n'est ajouté aux snapshots.
+- L'annonce d'objectif doit rester compréhensible sans son. Équilibrage en configuration normale et distinction des profils sur téléphone réel restent à confirmer.

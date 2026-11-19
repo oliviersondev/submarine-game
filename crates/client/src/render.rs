@@ -589,9 +589,9 @@ fn spawn_role_selector(commands: &mut Commands, player: &LocalPlayer) {
 }
 
 fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
-    for (action, label, top) in [
-        (LobbyAction::Ready, "PRET", 16.0),
-        (LobbyAction::Start, "DEMARRER", 68.0),
+    for (action, label) in [
+        (LobbyAction::Ready, "PRET"),
+        (LobbyAction::Start, "DEMARRER"),
     ] {
         commands.spawn((
             LobbyPanel,
@@ -605,7 +605,7 @@ fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
             TextColor(Color::srgb(0.82, 0.95, 1.0)),
             Node {
                 position_type: PositionType::Absolute,
-                top: px(top),
+                top: px(lobby_action_top(action)),
                 right: px(16),
                 width: px(220),
                 height: px(44),
@@ -618,6 +618,14 @@ fn spawn_lobby_actions(commands: &mut Commands, player: &LocalPlayer) {
             GlobalZIndex(40),
             lobby_action_visibility(player),
         ));
+    }
+}
+
+fn lobby_action_top(action: LobbyAction) -> f32 {
+    // The mission/briefing button occupies y=4..48; leave an 8px gap below it.
+    match action {
+        LobbyAction::Ready => 56.0,
+        LobbyAction::Start => 108.0,
     }
 }
 
@@ -650,10 +658,7 @@ fn update_lobby_action_layout(
             node.width = Val::Auto;
             node.max_width = px(420);
         } else {
-            node.top = px(match action {
-                LobbyAction::Ready => 16,
-                LobbyAction::Start => 68,
-            });
+            node.top = px(lobby_action_top(*action));
             node.bottom = Val::Auto;
             node.left = Val::Auto;
             node.right = px(16);
@@ -730,6 +735,7 @@ fn sonar_two_columns(width: f32, height: f32) -> bool {
 
 fn update_station_layout(
     state: Res<GameState>,
+    player: Res<LocalPlayer>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut nodes: Query<
         (
@@ -754,6 +760,8 @@ fn update_station_layout(
     mut hud_text: Single<&mut TextFont, With<HudText>>,
 ) {
     let landscape = compact_landscape(window.width(), window.height());
+    // Reserve the mission/audio action row instead of covering station telemetry.
+    let mission_actions = state.lobby.is_some() || state.mission.is_some();
     hud_text.font_size = FontSize::Px(if landscape {
         13.0
     } else if state.game_started {
@@ -770,7 +778,7 @@ fn update_station_layout(
                 Val::Auto
             };
             node.left = px(16);
-            node.top = px(16);
+            node.top = px(if mission_actions { 56 } else { 16 });
             if landscape {
                 node.right = Val::Auto;
                 node.bottom = px(16);
@@ -800,7 +808,7 @@ fn update_station_layout(
             node.bottom = px(16);
             if landscape && (pilot.is_some() || engineer.is_some()) {
                 node.left = px(276);
-                node.top = px(16);
+                node.top = px(if mission_actions { 56 } else { 16 });
                 node.width = Val::Auto;
                 node.max_width = Val::Auto;
                 node.padding = UiRect::all(px(10));
@@ -815,7 +823,13 @@ fn update_station_layout(
             } else {
                 node.left = px(8);
                 node.right = px(8);
-                node.top = px(8);
+                node.top = px(if !mission_actions {
+                    8
+                } else if tactical.is_some() && player.role == Some(CrewRole::Captain) {
+                    104 // Captain's command toggle occupies the second action row.
+                } else {
+                    56
+                });
                 node.bottom = px(8);
                 node.width = Val::Auto;
                 node.max_width = Val::Auto;
@@ -1362,52 +1376,40 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
         .with_children(|panel| {
             spawn_combat_status(panel);
             panel.spawn((
-                Text::new("SITUATION TACTIQUE // PISTES PARTAGEES UNIQUEMENT"),
+                crate::chart_ui::ChartHeading,
+                Text::new("SITUATION TACTIQUE // SONAR PARTAGE + VISUEL"),
                 TextFont {
                     font_size: FontSize::Px(16.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.95, 1.0)),
             ));
+            crate::chart_ui::spawn_feedback_banner(panel);
             panel
-                .spawn((
-                    StationBody,
-                    Node {
-                        width: percent(100),
-                        flex_grow: 1.0,
-                        min_height: px(0),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(6),
-                        ..default()
-                    },
-                ))
+                .spawn((Node {
+                    width: percent(100),
+                    flex_grow: 1.0,
+                    min_height: px(0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(4),
+                    ..default()
+                },))
                 .with_children(|body| {
-                    body.spawn(Node {
-                        flex_basis: px(0),
-                        flex_grow: 1.0,
-                        min_width: px(150),
-                        ..default()
-                    })
-                    .with_children(|map| spawn_polar_map(map, true));
-                    body.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        flex_grow: 1.0,
-                        flex_basis: px(0),
-                        min_width: px(174),
-                        min_height: px(0),
-                        ..default()
-                    })
-                    .with_children(|controls| {
-                        controls.spawn((
+                    crate::tactical_layout::spawn(body, |journal| {
+                        journal.spawn((
                             TacticalTrackList,
-                            Text::new("AUCUNE PISTE PARTAGEE"),
+                            Text::new("AUCUNE PISTE SONAR PARTAGEE"),
                             TextFont {
                                 font_size: FontSize::Px(12.0),
                                 ..default()
                             },
                             TextColor(Color::srgb(0.75, 0.92, 0.95)),
+                            Node {
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
+                            Pickable::IGNORE,
                         ));
-                        crate::weapons_ui::spawn(controls);
                     });
                 });
         });
@@ -1471,6 +1473,10 @@ fn scroll_sonar_tracks(
 }
 
 fn spawn_polar_map(parent: &mut ChildSpawnerCommands, tactical: bool) {
+    if tactical {
+        crate::chart_ui::spawn(parent);
+        return;
+    }
     parent
         .spawn((
             Node {
@@ -1485,9 +1491,6 @@ fn spawn_polar_map(parent: &mut ChildSpawnerCommands, tactical: bool) {
             BorderColor::all(Color::srgba(0.2, 0.75, 0.9, 0.55)),
         ))
         .with_children(|map| {
-            if tactical {
-                crate::torpedo_ui::spawn(map);
-            }
             for (label, left, top) in [
                 ("N 000", 43.0, 1.0),
                 ("E 090", 81.0, 45.0),
@@ -1950,7 +1953,7 @@ fn update_tactical_station(
         })
         .unwrap_or_default();
     list.0 = if tactical.shared_tracks.is_empty() {
-        format!("{own_state}AUCUNE PISTE PARTAGEE")
+        format!("{own_state}AUCUNE PISTE SONAR PARTAGEE")
     } else {
         let tracks = tactical
             .shared_tracks
@@ -2891,6 +2894,7 @@ pub(crate) fn error_label(error: &ProtocolError) -> String {
         ProtocolError::InvalidRoomCode => "CODE SALLE INVALIDE : 6 CHIFFRES REQUIS".to_owned(),
         ProtocolError::ConnectionFailed => "CONNEXION AU SERVEUR IMPOSSIBLE".to_owned(),
         ProtocolError::SubmarineDestroyed => "SOUS-MARIN PERDU : CREER UNE NOUVELLE SALLE".into(),
+        ProtocolError::MissionFinished => "MISSION TERMINEE : CREER UNE NOUVELLE SALLE".into(),
         ProtocolError::InvalidCompartment => "COMPARTIMENT INVALIDE".into(),
         ProtocolError::DamageControlBusy => "EQUIPE OCCUPEE : ANNULER POUR CHANGER DE PRIORITE".into(),
         ProtocolError::NoDamageToRepair => "AUCUNE FUITE, AUCUN FEU OU AUCUNE PANNE A TRAITER".into(),
@@ -2935,6 +2939,14 @@ fn valid_room_code(code: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn desktop_lobby_buttons_clear_briefing_and_each_other() {
+        let ready_top = super::lobby_action_top(super::LobbyAction::Ready);
+        let start_top = super::lobby_action_top(super::LobbyAction::Start);
+        assert!(ready_top >= 48.0 + 8.0);
+        assert!(start_top >= ready_top + 44.0 + 8.0);
+    }
+
     use super::*;
 
     #[test]

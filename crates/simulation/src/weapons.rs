@@ -658,6 +658,8 @@ mod tests {
             age: 0.0,
             old: false,
             shared: false,
+            origin_x: 0.0,
+            origin_y: 0.0,
         }
     }
 

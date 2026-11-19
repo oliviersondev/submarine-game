@@ -192,12 +192,6 @@ impl World {
             let heading = vessel.heading.to_radians();
             vessel.x += heading.sin() * distance;
             vessel.y += heading.cos() * distance;
-
-            if vessel.kind != VesselKind::Escort
-                && (vessel.x.abs() > 7_000.0 || vessel.y.abs() > 7_000.0)
-            {
-                vessel.heading = (vessel.heading + 180.0).rem_euclid(360.0);
-            }
         }
         events
     }

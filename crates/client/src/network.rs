@@ -161,6 +161,7 @@ pub struct LocalPlayer {
 
 #[derive(Resource, Default)]
 pub struct GameState {
+    pub mission: Option<shared::MissionProgress>,
     pub lobby: Option<LobbySnapshot>,
     pub previous_submarine: Option<SubmarineSnapshot>,
     pub submarine: Option<SubmarineSnapshot>,
@@ -435,6 +436,7 @@ fn handle_server_message(
         ServerPayload::Lobby(lobby) => state.lobby = Some(lobby),
         ServerPayload::MissionStarted { config } => {
             state.game_started = true;
+            state.mission = None; // Mission rules/progress arrive in the authoritative snapshot.
             state.weapons_config = Some(config.weapons);
             state.periscope_config = Some(config.periscope);
             state.events.clear();
@@ -449,6 +451,7 @@ fn handle_server_message(
         } => {
             if snapshot_id > state.snapshot_id {
                 commands.reconcile(&mission.submarine);
+                state.mission = Some(mission.progress);
                 state.previous_submarine = state.submarine.replace(mission.submarine);
                 state.sonar = mission.sonar;
                 state.tactical = mission.tactical;

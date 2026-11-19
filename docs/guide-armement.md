@@ -34,7 +34,9 @@ La carte représente les **estimations partagées**, pas les positions réelles 
 
 La **confiance n'est pas une probabilité de toucher**. Les estimations de distance, de cap, de vitesse et de classification peuvent être fausses. Plusieurs pistes peuvent aussi correspondre à un même contact : le Sonar peut les fusionner.
 
-La carte est schématique : se fier aux valeurs textuelles pour les distances, plutôt qu'à une mesure en pixels sur l'écran.
+La carte Capitaine/Armement possède une échelle uniforme, un quadrillage latitude/longitude fictif et une barre d'échelle. **− / +** ou la molette règlent le zoom ; glisser déplace la vue ; **RECENTRER** réactive le suivi du sous-marin et **EXTRACTION** cadre sa zone. Le sous-marin est une icône orientée de taille symbolique ; les pistes jaunes `P… EST.` et les courses restent des estimations, pas des positions ennemies réelles. Une piste sans distance est représentée par un relèvement « DIST. ? », pas par un point arbitraire. Le Sonar conserve sa vue polaire distincte.
+
+**Contacts visuels sur la carte :** après création au périscope, `V… OBS.` trace en cyan le relèvement observé, sans distance réelle. Après **TRANSMETTRE A L'ARMEMENT**, `V… EST. r…` montre une position extrapolée depuis vos seules hypothèses, avec âge et mention **HYPOTHESES MANUELLES**. Le marqueur devient **ANCIEN** après 30 s par défaut ; il ne disparaît pas simplement parce que le contact a expiré. Observer à nouveau ne met pas automatiquement à jour cette estimation : retransmettre explicitement pour la remplacer. L'Armement reçoit les contacts informatifs partagés et la désignation transmise, qui restent deux informations distinctes. Aucune fusion automatique avec les pistes sonar.
 
 ## 3. Lire l'état d'un tube
 

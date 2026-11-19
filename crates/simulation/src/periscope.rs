@@ -19,7 +19,6 @@ pub(crate) struct Periscope {
     next_observation: u64,
     next_contact: u64,
     origin: (f32, f32),
-    contact_origins: std::collections::HashMap<VisualContactId, (f32, f32)>,
 }
 
 impl Periscope {
@@ -134,7 +133,8 @@ impl Periscope {
                 contact.bearing = silhouette.bearing;
                 contact.kind = silhouette.kind;
                 contact.observed_at = self.elapsed;
-                self.contact_origins.insert(contact.id, self.origin);
+                contact.origin_x = self.origin.0;
+                contact.origin_y = self.origin.1;
             } else {
                 // Never reconnect a lost contact using its private vessel identity.
                 *vessel = None;
@@ -143,8 +143,6 @@ impl Periscope {
             contact.old = contact.age >= config.old_after;
         }
         self.contacts.retain(|(_, c)| c.age < config.expires_after);
-        self.contact_origins
-            .retain(|id, _| self.contacts.iter().any(|(_, c)| c.id == *id));
     }
 
     pub(crate) fn command(&mut self, command: PlayerCommand) -> Result<(), ProtocolError> {
@@ -177,8 +175,6 @@ impl Periscope {
                     return Err(ProtocolError::VisualContactLimitReached);
                 }
                 self.next_contact += 1;
-                self.contact_origins
-                    .insert(VisualContactId(self.next_contact), self.origin);
                 self.contacts.push((
                     Some(*index),
                     VisualContact {
@@ -189,6 +185,8 @@ impl Periscope {
                         age: 0.0,
                         old: false,
                         shared: false,
+                        origin_x: self.origin.0,
+                        origin_y: self.origin.1,
                     },
                 ));
             }
@@ -245,11 +243,7 @@ impl Periscope {
             .iter()
             .find(|(_, c)| c.id == id)
             .ok_or(ProtocolError::VisualContactNotFound)?;
-        let origin = self
-            .contact_origins
-            .get(&id)
-            .ok_or(ProtocolError::VisualContactNotFound)?;
-        Ok((contact.1.clone(), *origin))
+        Ok((contact.1.clone(), (contact.1.origin_x, contact.1.origin_y)))
     }
 }
 
@@ -416,6 +410,50 @@ mod tests {
         assert_eq!(p.contacts(false)[0].bearing, 0.0);
         p.update(&w, &s, c, false, 90.0);
         assert!(p.contacts(false).is_empty());
+    }
+
+    #[test]
+    fn bearing_origin_is_own_observed_position_and_freezes_after_loss() {
+        let (mut p, mut world, mut own, config) = scene();
+        own.x = 321.0;
+        own.y = -456.0;
+        raise(&mut p, &world, &own, config);
+        p.command(PlayerCommand::CreateVisualContact {
+            observation_id: p.visible[0].1.observation_id,
+        })
+        .unwrap();
+        let contact = &p.contacts(false)[0];
+        assert_eq!((contact.origin_x, contact.origin_y), (321.0, -456.0));
+        assert_ne!(
+            (contact.origin_x, contact.origin_y),
+            (world.vessels[0].x, world.vessels[0].y)
+        );
+        own.x = 420.0;
+        own.y = -500.0;
+        p.update(&world, &own, config, false, 0.05);
+        let frozen = p.contacts(false)[0].clone();
+        assert_eq!((frozen.origin_x, frozen.origin_y), (420.0, -500.0));
+        p.command(PlayerCommand::SetPeriscopeRaised(false)).unwrap();
+        own.x = 2_000.0;
+        own.y = 1_000.0;
+        world.vessels[0].x = -50_000.0;
+        p.update(&world, &own, config, false, 31.0);
+        p.command(PlayerCommand::ShareVisualContact(frozen.id))
+            .unwrap();
+        let shared = p.contacts(true)[0].clone();
+        assert_eq!(
+            (shared.origin_x, shared.origin_y),
+            (frozen.origin_x, frozen.origin_y)
+        );
+        assert_eq!(
+            (shared.bearing, shared.observed_at),
+            (frozen.bearing, frozen.observed_at)
+        );
+        assert!(shared.old && shared.age >= 31.0);
+        assert_eq!(
+            p.firing_observation(frozen.id).unwrap().1,
+            (frozen.origin_x, frozen.origin_y)
+        );
     }
     #[test]
     fn apparent_size_orientation_and_destruction_are_observable_only() {
