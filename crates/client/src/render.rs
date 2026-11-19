@@ -1386,35 +1386,17 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
             ));
             crate::chart_ui::spawn_feedback_banner(panel);
             panel
-                .spawn((
-                    StationBody,
-                    Node {
-                        width: percent(100),
-                        flex_grow: 1.0,
-                        min_height: px(0),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(6),
-                        ..default()
-                    },
-                ))
+                .spawn((Node {
+                    width: percent(100),
+                    flex_grow: 1.0,
+                    min_height: px(0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(4),
+                    ..default()
+                },))
                 .with_children(|body| {
-                    body.spawn(Node {
-                        flex_basis: px(0),
-                        flex_grow: 1.0,
-                        min_width: px(150),
-                        ..default()
-                    })
-                    .with_children(|map| spawn_polar_map(map, true));
-                    body.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        flex_grow: 1.0,
-                        flex_basis: px(0),
-                        min_width: px(174),
-                        min_height: px(0),
-                        ..default()
-                    })
-                    .with_children(|controls| {
-                        controls.spawn((
+                    crate::tactical_layout::spawn(body, |journal| {
+                        journal.spawn((
                             TacticalTrackList,
                             Text::new("AUCUNE PISTE SONAR PARTAGEE"),
                             TextFont {
@@ -1422,8 +1404,12 @@ fn spawn_tactical_station(commands: &mut Commands, player: &LocalPlayer) {
                                 ..default()
                             },
                             TextColor(Color::srgb(0.75, 0.92, 0.95)),
+                            Node {
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
+                            Pickable::IGNORE,
                         ));
-                        crate::weapons_ui::spawn(controls);
                     });
                 });
         });

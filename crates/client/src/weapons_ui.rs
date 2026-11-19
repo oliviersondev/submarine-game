@@ -1,3 +1,4 @@
+use crate::button_activation::{self, ButtonActivated};
 use crate::network::{CommandQueue, GameState, LocalPlayer};
 use bevy::prelude::*;
 use shared::{CrewRole, PlayerCommand, ShotSettings, ShotTarget, TubePhase};
@@ -42,20 +43,20 @@ enum Action {
     Cancel,
 }
 #[derive(Component)]
-struct WeaponStatus;
+pub(crate) struct WeaponStatus;
 #[derive(Component)]
 struct ActionLabel(Action);
 #[derive(Component)]
-struct WeaponScroll;
+struct WeaponSummary;
 #[derive(Component)]
-struct ScrollStart(Vec2);
+struct WeaponGrid;
 
 pub struct WeaponsUiPlugin;
 impl Plugin for WeaponsUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponUi>().add_systems(
             Update,
-            (buttons, update)
+            (buttons, update, layout)
                 .chain()
                 .after(crate::network::NetworkReceiveSet),
         );
@@ -63,35 +64,102 @@ impl Plugin for WeaponsUiPlugin {
 }
 
 pub fn spawn(parent: &mut ChildSpawnerCommands) {
-    parent.spawn((WeaponScroll, ScrollStart(Vec2::ZERO), ScrollPosition(Vec2::ZERO),
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4), min_height: px(0),
-        overflow: Overflow::scroll_y(), min_width: px(174), flex_grow: 1.0, flex_basis: px(0), ..default() }))
-        .observe(|drag: On<Pointer<Drag>>, scale: Res<UiScale>, mut panel: Single<(&ComputedNode, &mut ScrollPosition, &ScrollStart), With<WeaponScroll>>| {
-            let range = (panel.0.content_size.y - panel.0.size.y).max(0.0) * panel.0.inverse_scale_factor;
-            panel.1.0.y = (panel.2.0.y - drag.distance.y / scale.0).clamp(0.0, range);
-        })
-        .observe(|_: On<Pointer<DragStart>>, mut panel: Single<(&ScrollPosition, &mut ScrollStart), With<WeaponScroll>>| { panel.1.0 = panel.0.0; })
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+                width: percent(100),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.01, 0.055, 0.075)),
+        ))
         .with_children(|panel| {
-        panel.spawn((WeaponStatus, Text::new("ARMEMENT"), TextFont { font_size: FontSize::Px(12.0), ..default() },
-            TextColor(Color::srgb(0.8, 0.95, 1.0))));
-        crate::periscope_ui::spawn_shared_contacts(panel);
-        for row in [vec![Action::Target, Action::Tube], vec![Action::Field, Action::Minus, Action::Plus],
-            vec![Action::Configure, Action::Prepare], vec![Action::Fire, Action::Cancel]] {
-            panel.spawn(Node { column_gap: px(4), width: percent(100), flex_shrink: 0.0, ..default() }).with_children(|line| {
-                for action in row {
-                    line.spawn((Button, action, Node { min_height: px(44), flex_grow: 1.0, flex_basis: px(0),
-                        justify_content: JustifyContent::Center, align_items: AlignItems::Center,
-                        padding: UiRect::all(px(4)), ..default() }, BackgroundColor(Color::srgb(0.04, 0.18, 0.23))))
-                    .with_children(|button| { button.spawn((ActionLabel(action), Text::new("..."),
-                        TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(Color::WHITE))); });
-                }
-            });
-        }
-    });
+            panel.spawn((
+                WeaponSummary,
+                Text::new("ARMEMENT"),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.8, 0.95, 1.0)),
+            ));
+            panel
+                .spawn((
+                    WeaponGrid,
+                    Node {
+                        display: Display::Grid,
+                        grid_template_columns: RepeatedGridTrack::flex(3, 1.0),
+                        column_gap: px(4),
+                        row_gap: px(4),
+                        width: percent(100),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ))
+                .with_children(|line| {
+                    for action in [
+                        Action::Target,
+                        Action::Tube,
+                        Action::Field,
+                        Action::Minus,
+                        Action::Plus,
+                        Action::Configure,
+                        Action::Prepare,
+                        Action::Fire,
+                        Action::Cancel,
+                    ] {
+                        let mut button = line.spawn((
+                            Button,
+                            action,
+                            Node {
+                                min_height: px(44),
+                                min_width: px(0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.04, 0.18, 0.23)),
+                        ));
+                        button_activation::enable(&mut button);
+                        button.with_children(|button| {
+                            button.spawn((
+                                ActionLabel(action),
+                                Text::new("..."),
+                                TextFont {
+                                    font_size: FontSize::Px(12.0),
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                                Pickable::IGNORE,
+                            ));
+                        });
+                    }
+                });
+        });
+}
+
+fn layout(
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut grids: Query<&mut Node, With<WeaponGrid>>,
+) {
+    let columns = if window.width() >= 960.0 {
+        9
+    } else if window.width() >= 600.0 {
+        5
+    } else {
+        3
+    };
+    for mut node in &mut grids {
+        node.grid_template_columns = RepeatedGridTrack::flex(columns, 1.0);
+    }
 }
 
 fn buttons(
-    query: Query<(&Interaction, &Action), Changed<Interaction>>,
+    query: Query<&Action>,
+    mut clicks: MessageReader<ButtonActivated>,
     player: Res<LocalPlayer>,
     state: Res<GameState>,
     mut ui: ResMut<WeaponUi>,
@@ -109,10 +177,10 @@ fn buttons(
     let Some(tactical) = &state.tactical else {
         return;
     };
-    for (interaction, action) in &query {
-        if *interaction != Interaction::Pressed {
+    for click in clicks.read() {
+        let Ok(action) = query.get(click.0) else {
             continue;
-        }
+        };
         if !matches!(action, Action::Fire) {
             ui.confirmation = None;
         }
@@ -266,13 +334,24 @@ fn update(
     player: Res<LocalPlayer>,
     mut ui: ResMut<WeaponUi>,
     mut status: Query<&mut Text, With<WeaponStatus>>,
-    mut labels: Query<(&ActionLabel, &mut Text), Without<WeaponStatus>>,
+    mut labels: Query<(&ActionLabel, &mut Text), (Without<WeaponStatus>, Without<WeaponSummary>)>,
+    mut summary: Query<
+        &mut Text,
+        (
+            With<WeaponSummary>,
+            Without<WeaponStatus>,
+            Without<ActionLabel>,
+        ),
+    >,
     mut actions: Query<(&Action, &mut BackgroundColor)>,
 ) {
     let Some(weapons) = &state.weapons else {
         return;
     };
     if weapons.tubes.is_empty() {
+        for mut text in &mut summary {
+            **text = "ARMEMENT : en attente des tubes".into();
+        }
         ui.confirmation = None;
         for mut text in &mut status {
             **text = "Armement indisponible : aucun tube recu. Attendre la synchronisation.".into();
@@ -289,6 +368,15 @@ fn update(
     let Some(tube) = weapons.tubes.get(ui.tube) else {
         return;
     };
+    for mut text in &mut summary {
+        **text = format!(
+            "T{} / {} / {:.0}s / AUT. {}",
+            ui.tube + 1,
+            phase_label(tube.phase),
+            tube.remaining_seconds,
+            if tube.authorized { "OUI" } else { "NON" }
+        );
+    }
     let current_solution = weapons.solutions.get(ui.tube).and_then(|s| s.as_ref());
     let tracks = state
         .tactical
@@ -402,7 +490,7 @@ fn update(
     let configured = tube.settings.map_or_else(|| "CONFIGURATION APPLIQUEE : aucune cible.".into(), |s|
         format!("CONFIGURATION APPLIQUEE : {} / torpille {:.0}m / correction cap {:+.0} deg / vit. {:+.0} kn", s.target, s.depth, s.heading_correction, s.speed_correction));
     for mut text in &mut status {
-        **text = format!("{}\nTUBE {} {} // {} / {:.0}s\nReserve {} / courses suivies {} / autorisation {}\n{}\n{}\n{}\n{}\nDerniere action locale : {}\n{}\nGlisser pour defiler",
+        **text = format!("{}\nTUBE {} {} // {} / {:.0}s\nReserve {} / courses suivies {} / autorisation {}\n{}\n{}\n{}\n{}\nDerniere action locale : {}\n{}",
             selected,
             ui.tube + 1, if ui.tube == 4 { "ARR" } else { "AV" }, phase_label(tube.phase), tube.remaining_seconds,
             weapons.reserve, weapons.torpedoes.len(), if tube.authorized { "OUI" } else { "NON" },

@@ -70,6 +70,75 @@ impl Plugin for ChartUiPlugin {
                     .before(ChartViewSet),
             )
             .add_systems(Update, paint.after(ChartViewSet));
+        app.add_systems(
+            Update,
+            compact_layout
+                .after(update_feedback_banner)
+                .before(ChartViewSet),
+        );
+    }
+}
+
+fn compact_layout(
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    state: Res<GameState>,
+    mut nodes: Query<
+        (
+            &mut Node,
+            Has<ChartRoot>,
+            Has<ChartCanvas>,
+            Has<Footer>,
+            Has<ChartHeading>,
+        ),
+        Or<(
+            With<ChartRoot>,
+            With<ChartCanvas>,
+            With<Footer>,
+            With<ChartHeading>,
+        )>,
+    >,
+) {
+    let compact = window.height() <= 500.0;
+    let notice = state
+        .submarine
+        .as_ref()
+        .and_then(|sub| {
+            crate::mission_feedback::extraction_notice(state.mission, sub.common.x, sub.common.y)
+        })
+        .is_some();
+    for (mut node, root, canvas, footer, heading) in &mut nodes {
+        if root {
+            node.min_height = px(if compact {
+                44
+            } else if notice {
+                132
+            } else {
+                154
+            });
+        }
+        if canvas {
+            node.min_height = px(if compact {
+                0
+            } else if notice {
+                50
+            } else {
+                72
+            });
+        }
+        if footer {
+            node.display = if compact {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
+        if heading {
+            node.display = if compact || notice {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
     }
 }
 
@@ -349,6 +418,10 @@ fn update_view(
     buttons: Query<&Action>,
     mut clicks: MessageReader<ButtonActivated>,
     mut wheel: MessageReader<MouseWheel>,
+    journals: Query<
+        (&RelativeCursorPosition, &Node, &InheritedVisibility),
+        With<crate::tactical_layout::Journal>,
+    >,
     mut room: Local<Option<shared::RoomId>>,
 ) {
     let current_room = state.lobby.as_ref().map(|l| l.room_id.clone());
@@ -386,7 +459,10 @@ fn update_view(
         }
     }
     for event in wheel.read() {
-        if active && canvas.1.cursor_over() {
+        if active
+            && canvas.1.cursor_over()
+            && !crate::tactical_layout::pointer_over_journal(&journals)
+        {
             let amount = match event.unit {
                 MouseScrollUnit::Line => event.y,
                 MouseScrollUnit::Pixel => event.y / 100.0,

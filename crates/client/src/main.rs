@@ -16,6 +16,7 @@ mod periscope_ui;
 mod render;
 mod role;
 mod silhouette;
+mod tactical_layout;
 mod torpedo_ui;
 mod visual_chart;
 mod visual_chart_ui;
@@ -41,6 +42,7 @@ fn main() {
         .add_plugins(explosion_audio::ExplosionAudioPlugin)
         .add_plugins(damage_control_ui::DamageControlUiPlugin)
         .add_plugins(weapons_ui::WeaponsUiPlugin)
+        .add_plugins(tactical_layout::TacticalLayoutPlugin)
         .add_plugins(torpedo_ui::TorpedoUiPlugin)
         .add_plugins(periscope_ui::PeriscopeUiPlugin)
         .add_plugins(mission_ui::MissionUiPlugin)

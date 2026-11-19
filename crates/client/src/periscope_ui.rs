@@ -1581,6 +1581,7 @@ pub(crate) fn shared_contacts_text(state: &GameState) -> String {
 pub(crate) fn spawn_shared_contacts(parent: &mut ChildSpawnerCommands) {
     parent.spawn((
         SharedContacts,
+        Pickable::IGNORE,
         Text::new(""),
         TextFont {
             font_size: FontSize::Px(12.0),
